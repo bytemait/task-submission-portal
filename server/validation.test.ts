@@ -358,7 +358,40 @@ test('Video Editing: word limit enforcement on creative note', () => {
   // Fix: 50 words exactly
   sub.deptAnswers!['video-editing']!.creativeNote = Array(50).fill('word').join(' ');
   const errors2 = validateDeptSubmission(sub);
+
   assert.ok(!errors2.some(e => e.includes('word limit')));
+});
+test('Video Editing accepts an optional portfolio URL and rejects malformed URLs', () => {
+  const sub = emptySubmission();
+  sub.student.name = 'Test'; sub.student.enrollment = 'ABC123'; sub.student.year = '1';
+  sub.selected = ['video-editing'];
+  sub.deptAnswers = { 'video-editing': {
+    driveUrl: 'https://drive.google.com/file/d/abc123',
+    software: 'DaVinci Resolve',
+    creativeNote: 'A short creative note.',
+    drivePublic: true, fileName: true, originalQuality: true,
+    duration: true, byteFootage: true, noTemplate: true,
+  } };
+  assert.deepEqual(validateDeptSubmission(sub), []);
+  sub.deptAnswers['video-editing']!.portfolioUrl = 'javascript:alert(1)';
+  assert.ok(validateDeptSubmission(sub).some(error => error.includes('HTTP(S) link')));
+});
+
+test('Graphic Design portfolio is optional and accepts a valid link', () => {
+  const sub = emptySubmission();
+  sub.student.name = 'Test'; sub.student.enrollment = 'ABC123'; sub.student.year = '1';
+  sub.selected = ['graphic-design'];
+  sub.deptAnswers = { 'graphic-design': {
+    driveUrl: 'https://drive.google.com/file/d/abc123',
+    software: 'Figma', concept: 'A clean minimal poster',
+    posterPublic: true, posterFile: true, qrReadable: true,
+    resolution: true, contentPack: true, noTemplate: true,
+  } };
+  assert.deepEqual(validateDeptSubmission(sub), []);
+  sub.deptAnswers['graphic-design']!.portfolioUrl = 'https://behance.net/example';
+  assert.deepEqual(validateDeptSubmission(sub), []);
+  sub.deptAnswers['graphic-design']!.portfolioUrl = 'javascript:alert(1)';
+  assert.ok(validateDeptSubmission(sub).some(error => error.includes('HTTP(S) link')));
 });
 
 // ── Cybersecurity: GitHub + Google Doc URLs ──────────────────────────────────
@@ -431,7 +464,7 @@ test('Outreach accepts Drive file or Google Doc', () => {
 });
 
 // ── Graphic Design: conditional Canva field ──────────────────────────────────
-test('Graphic Design Canva link required only when software is Canva', () => {
+test('Graphic Design Canva edit link is optional and validated when provided', () => {
   const sub = emptySubmission();
   sub.student.name = 'Test'; sub.student.enrollment = 'ABC123';
   sub.student.year = '1';
@@ -448,15 +481,16 @@ test('Graphic Design Canva link required only when software is Canva', () => {
   const errors = validateDeptSubmission(sub);
   assert.ok(!errors.some(e => e.includes('Canva')));
 
-  // Switch to Canva — now canvaUrl is required
+  // The editable Canva link is optional.
   sub.deptAnswers!['graphic-design']!.software = 'Canva';
-  const errors2 = validateDeptSubmission(sub);
-  assert.ok(errors2.some(e => e.includes('Editable Canva link')));
+  assert.deepEqual(validateDeptSubmission(sub), []);
 
-  // Provide the link
+  // But a supplied URL must still be a valid HTTP(S) URL.
+  sub.deptAnswers!['graphic-design']!.canvaUrl = 'javascript:alert(1)';
+  assert.ok(validateDeptSubmission(sub).some(error => error.includes('HTTP(S) link')));
+
   sub.deptAnswers!['graphic-design']!.canvaUrl = 'https://www.canva.com/design/abc/edit';
-  const errors3 = validateDeptSubmission(sub);
-  assert.ok(!errors3.some(e => e.includes('Canva')));
+  assert.deepEqual(validateDeptSubmission(sub), []);
 });
 
 // ── ML department selection ──────────────────────────────────────────────────
