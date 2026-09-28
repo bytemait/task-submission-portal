@@ -24,14 +24,21 @@ export async function checkRepository(value: unknown): Promise<{ ok: boolean; er
 export function validateSubmission(data: Submission, final: boolean): string[] {
   const errors: string[] = [];
   if (!data || typeof data !== 'object' || !data.student || typeof data.student !== 'object' || !Array.isArray(data.selected) || !data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) return ['Invalid submission.'];
-  const { name, enrollment, email, phone, year } = data.student;
+  const { name, enrollment, email, phone, dept, year, otherSocieties, socials } = data.student;
   if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100 || typeof enrollment !== 'string' || !/^[A-Z0-9/-]{4,30}$/.test(enrollment)) errors.push('Enter a valid name and enrollment number.');
   if (typeof email !== 'string' || email.length > 160 || email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
   if (typeof phone !== 'string' || phone.length > 20 || phone && !/^[\d+()\s-]{7,20}$/.test(phone)) errors.push('Enter a valid phone number.');
-  if (typeof year !== 'string' || year.length > 40) errors.push('Invalid year.');
+  if (dept !== undefined && (typeof dept !== 'string' || dept.length > 100)) errors.push('Invalid department.');
+  if (typeof year !== 'string' || year.length > 60) errors.push('Invalid year / semester.');
+  if (otherSocieties !== undefined && (typeof otherSocieties !== 'string' || otherSocieties.length > 500)) errors.push('Other societies field too long.');
+  if (socials !== undefined && typeof socials === 'object' && socials !== null) {
+    if (socials.instagram !== undefined && (typeof socials.instagram !== 'string' || socials.instagram.length > 100)) errors.push('Invalid Instagram handle.');
+    if (socials.twitter !== undefined && (typeof socials.twitter !== 'string' || socials.twitter.length > 100)) errors.push('Invalid Twitter/X handle.');
+    if (socials.discord !== undefined && (typeof socials.discord !== 'string' || socials.discord.length > 100)) errors.push('Invalid Discord handle.');
+  }
   if (data.selected.length > tracks.length || new Set(data.selected).size !== data.selected.length || data.selected.some(id => !tracks.some(t => t.id === id))) errors.push('Invalid track selection.');
   if (final) {
-    if (!email || !phone || !year) errors.push('Complete all your personal details.');
+    if (!email || !phone || !year || !dept) errors.push('Complete all your personal details.');
     if (!data.selected.length) errors.push('Choose at least one track.');
   }
   for (const track of tracks.filter(t => data.selected.includes(t.id))) {

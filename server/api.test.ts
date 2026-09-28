@@ -28,7 +28,7 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.equal(created.data.found, false);
     const cookie = created.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     const draft = created.data.submission;
-    draft.student.email = 'test@example.com'; draft.student.phone = '9876543210'; draft.student.year = '2nd year';
+    draft.student.email = 'test@example.com'; draft.student.phone = '9876543210'; draft.student.dept = 'CSE'; draft.student.year = '2nd year (Sem 3)';
     draft.selected = ['graphic-design']; draft.answers = { 'graphic-design': { work: 'https://example.com/portfolio' } };
     assert.equal((await call('/draft', 'PUT', draft, cookie)).response.status, 200);
     const recovered = await call('/draft/recover', 'POST', { name: 'test   student', enrollment: '12345678' });
@@ -45,6 +45,27 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     const listing = await call('/admin/submissions', 'GET', undefined, adminCookie);
     assert.equal(listing.data.length, 1);
     assert.equal(listing.data[0].status, 'submitted');
+
+    // Test unauthenticated export
+    const unauthExport = await fetch(base + '/admin/export.csv');
+    assert.equal(unauthExport.status, 401);
+
+    // Test authenticated CSV export
+    const csvExport = await fetch(base + '/admin/export.csv', { headers: { cookie: adminCookie } });
+    assert.equal(csvExport.status, 200);
+    assert.ok(csvExport.headers.get('content-type')?.includes('text/csv'));
+    const csvText = await csvExport.text();
+    assert.ok(csvText.includes('12345678,Test Student,test@example.com'));
+    assert.ok(csvText.includes('https://example.com/portfolio'));
+
+    // Test authenticated JSON export
+    const jsonExport = await fetch(base + '/admin/export.json', { headers: { cookie: adminCookie } });
+    assert.equal(jsonExport.status, 200);
+    assert.ok(jsonExport.headers.get('content-type')?.includes('application/json'));
+    const jsonData = await jsonExport.json() as any[];
+    assert.equal(jsonData.length, 1);
+    assert.equal(jsonData[0].student.enrollment, '12345678');
+
     await call('/admin/logout', 'POST', {}, adminCookie);
     assert.equal((await call('/admin/submissions', 'GET', undefined, adminCookie)).response.status, 401);
   } finally { process.kill(); rmSync(dir, { recursive: true, force: true }); }
