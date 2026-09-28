@@ -5,7 +5,20 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tracks, type Submission } from '../shared/tracks.ts';
-import { validateSubmission, checkRepository, normalizeEnrollment } from './validation.ts';
+import { validateSubmission, checkRepository, normalizeEnrollment, normalizeStudentProfile, studentToProfileData, isSubmissionProfileComplete, checkDriveAccessibility } from './validation.ts';
+import { validateProfile } from '../shared/validation.ts';
+import { deptConfigs, getDeptConfig } from '../shared/submissionConfig.ts';
+
+// ── Submission window (server-side enforcement) ─────────────────────────────
+const SUBMISSION_OPENS = new Date(process.env.SUBMISSION_OPENS_AT || '2025-09-29T00:01:00+05:30');
+const SUBMISSION_CLOSES_STR = process.env.SUBMISSION_CLOSES_AT || '';
+const SUBMISSION_CLOSES = SUBMISSION_CLOSES_STR ? new Date(SUBMISSION_CLOSES_STR) : null;
+function isSubmissionWindowOpen(): boolean {
+  const now = Date.now();
+  if (now < SUBMISSION_OPENS.getTime()) return false;
+  if (SUBMISSION_CLOSES && now > SUBMISSION_CLOSES.getTime()) return false;
+  return true;
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -14,6 +27,19 @@ const path = resolve(process.env.DB_PATH || './data/submissions.sqlite');
 mkdirSync(dirname(path), { recursive: true });
 const db = new DatabaseSync(path);
 db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS submissions (enrollment TEXT PRIMARY KEY, name_key TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, submitted_at TEXT);');
+
+// ── Migration: add profile_completed_at column (idempotent) ─────────────────
+try {
+  // Check if column exists by querying table info
+  const cols = db.prepare("PRAGMA table_info(submissions)").all() as { name: string }[];
+  if (!cols.some(c => c.name === 'profile_completed_at')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN profile_completed_at TEXT;');
+    console.log('Migration: added profile_completed_at column.');
+  }
+} catch (e) {
+  console.error('Migration check failed:', e);
+}
+
 const sessions = new Map<string, { role: 'admin' | 'draft'; enrollment?: string; expires: number }>();
 const attempts = new Map<string, { count: number; until: number }>();
 const secure = process.env.SECURE_COOKIES === '1';
@@ -43,21 +69,41 @@ function clear(req: express.Request, res: express.Response, role: 'admin' | 'dra
 }
 // Reject cross-origin writes. Dev proxy requests retain the browser's Origin
 // while their Host becomes the API host, so explicitly allow configured UI origins.
-const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
+const isDev = process.env.NODE_ENV !== 'production';
+const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3001', 'http://127.0.0.1:3001'];
+const allowedOrigins = new Set([
+  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean),
+  ...(isDev ? defaultDevOrigins : []),
+]);
+
 app.use('/api', (req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const origin = req.get('origin');
     const host = req.get('host');
     try {
-      if (origin && (!['http:', 'https:'].includes(new URL(origin).protocol) ||
-        (new URL(origin).host !== host && !allowedOrigins.has(origin)))) {
-        res.status(403).json({ error: 'Invalid origin.' }); return;
+      if (origin) {
+        const originUrl = new URL(origin);
+        if (!['http:', 'https:'].includes(originUrl.protocol)) {
+          res.status(403).json({ error: 'Invalid origin.' }); return;
+        }
+        const isAllowed = originUrl.host === host ||
+          allowedOrigins.has(origin) ||
+          (isDev && (
+            originUrl.hostname === 'localhost' ||
+            originUrl.hostname === '127.0.0.1' ||
+            originUrl.hostname.startsWith('192.168.') ||
+            originUrl.hostname.startsWith('10.') ||
+            originUrl.hostname.endsWith('.local')
+          ));
+        if (!isAllowed) {
+          res.status(403).json({ error: 'Invalid origin.' }); return;
+        }
       }
     } catch { res.status(403).json({ error: 'Invalid origin.' }); return; }
   }
   next();
 });
-type Row = { enrollment: string; name_key: string; payload: string; status: string; updated_at: string; submitted_at: string | null };
+type Row = { enrollment: string; name_key: string; payload: string; status: string; updated_at: string; submitted_at: string | null; profile_completed_at: string | null };
 const getRow = (enrollment: string) => db.prepare('SELECT * FROM submissions WHERE enrollment=?').get(enrollment) as Row | undefined;
 const cleanName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 app.get('/api/health', (_req, res) => {
@@ -65,6 +111,108 @@ app.get('/api/health', (_req, res) => {
   catch { res.status(503).json({ status: 'unavailable' }); }
 });
 app.get('/api/tracks', (_req, res) => res.json(tracks));
+app.get('/api/config/window', (_req, res) => res.json({
+  opens: SUBMISSION_OPENS.toISOString(),
+  closes: SUBMISSION_CLOSES ? SUBMISSION_CLOSES.toISOString() : null,
+  isOpen: isSubmissionWindowOpen(),
+}));
+app.get('/api/config/departments', (_req, res) => res.json(deptConfigs.map(d => ({
+  id: d.id, name: d.name, category: d.category, color: d.color, comingSoon: d.comingSoon || false,
+}))));
+
+// ── Profile endpoints ───────────────────────────────────────────────────────
+app.get('/api/profile', (req, res) => {
+  const s = session(req, 'draft');
+  if (!s) { res.status(401).json({ error: 'Sign in to view your profile.' }); return; }
+  const row = getRow(s.enrollment!);
+  if (!row) { res.status(404).json({ error: 'No profile found.' }); return; }
+  const submission = JSON.parse(row.payload) as Submission;
+  res.json({
+    profile: submission.student,
+    profileComplete: isSubmissionProfileComplete(submission),
+    profileCompletedAt: row.profile_completed_at || submission.profileCompletedAt || null,
+    updatedAt: row.updated_at,
+  });
+});
+
+app.put('/api/profile', (req, res) => {
+  const s = session(req, 'draft');
+  if (!s) { res.status(401).json({ error: 'Sign in to update your profile.' }); return; }
+  if (limited(req, 'profile:' + (s.enrollment || key(req)), 30)) {
+    res.status(429).json({ error: 'Too many updates. Please wait a few minutes.' }); return;
+  }
+  const row = getRow(s.enrollment!);
+  if (!row) { res.status(404).json({ error: 'No draft found. Start a new submission first.' }); return; }
+  if (row.status === 'submitted') { res.status(409).json({ error: 'Already submitted. Profile cannot be changed.' }); return; }
+
+  // Optimistic concurrency: if client sends updatedAt, verify it matches
+  const clientUpdatedAt = req.body?.updatedAt;
+  if (clientUpdatedAt && clientUpdatedAt !== row.updated_at) {
+    res.status(409).json({ error: 'This profile was updated in another tab. Refresh to see the latest version.' }); return;
+  }
+
+  const existing = JSON.parse(row.payload) as Submission;
+  const body = req.body?.profile;
+  if (!body || typeof body !== 'object') { res.status(400).json({ error: 'Invalid profile data.' }); return; }
+
+  // Reject unknown fields
+  const allowed = new Set(['name', 'email', 'phone', 'enrollment', 'academicBranch', 'year', 'semester', 'inOtherSocieties', 'societies', 'instagram', 'twitter', 'discord']);
+  for (const k of Object.keys(body)) {
+    if (!allowed.has(k)) { res.status(400).json({ error: `Unknown field: ${k}` }); return; }
+  }
+
+  // Name and enrollment cannot change after draft creation
+  if (body.name !== undefined && cleanName(body.name) !== row.name_key) {
+    res.status(400).json({ error: 'Name cannot be changed after starting a draft.' }); return;
+  }
+  if (body.enrollment !== undefined && normalizeEnrollment(body.enrollment) !== s.enrollment) {
+    res.status(400).json({ error: 'Enrollment cannot be changed after starting a draft.' }); return;
+  }
+
+  // Merge profile fields
+  const updatedStudent = {
+    ...existing.student,
+    email: body.email !== undefined ? body.email : existing.student.email,
+    phone: body.phone !== undefined ? body.phone : existing.student.phone,
+    academicBranch: body.academicBranch !== undefined ? body.academicBranch : existing.student.academicBranch,
+    year: body.year !== undefined ? body.year : existing.student.year,
+    semester: body.semester !== undefined ? body.semester : existing.student.semester,
+    inOtherSocieties: body.inOtherSocieties !== undefined ? body.inOtherSocieties : existing.student.inOtherSocieties,
+    societies: body.societies !== undefined ? body.societies : existing.student.societies,
+    instagram: body.instagram !== undefined ? body.instagram : existing.student.instagram,
+    twitter: body.twitter !== undefined ? body.twitter : existing.student.twitter,
+    discord: body.discord !== undefined ? body.discord : existing.student.discord,
+  };
+
+  // Normalize server-side
+  const normalized = normalizeStudentProfile(updatedStudent);
+
+  // Validate
+  const profileData = studentToProfileData(normalized);
+  const errors = validateProfile(profileData);
+
+  // Allow saving with errors (partial save) but track completion
+  const complete = Object.keys(errors).length === 0;
+  const now = new Date().toISOString();
+  const updatedSubmission: Submission = {
+    ...existing,
+    student: normalized,
+    profileCompletedAt: complete ? (existing.profileCompletedAt || now) : undefined,
+    updatedAt: now,
+  };
+
+  db.prepare('UPDATE submissions SET payload=?,updated_at=?,profile_completed_at=? WHERE enrollment=? AND status=\'draft\'')
+    .run(JSON.stringify(updatedSubmission), now, complete ? (row.profile_completed_at || now) : null, s.enrollment);
+
+  // Return field errors for client-side display (but still save)
+  res.json({
+    updatedAt: now,
+    profileComplete: complete,
+    profileCompletedAt: complete ? (row.profile_completed_at || now) : null,
+    errors: Object.keys(errors).length > 0 ? errors : undefined,
+  });
+});
+
 app.post('/api/draft/recover', (req, res) => {
   if (limited(req, 'recover', 12)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
   const { name, enrollment } = req.body || {};
@@ -74,9 +222,12 @@ app.post('/api/draft/recover', (req, res) => {
   if (row?.status === 'submitted') { res.status(409).json({ error: 'This enrollment number already has a final submission. Contact BYTE for changes.' }); return; }
   clear(req, res, 'draft'); setSession(res, 'draft', id);
   if (row) { res.json({ found: true, submission: JSON.parse(row.payload) }); return; }
-  const initial: Submission = { student: { name: name.trim(), enrollment: id, email: '', phone: '', year: '' }, selected: [], answers: {}, status: 'draft' };
+  const initial: Submission = {
+    student: { name: name.trim(), enrollment: id, email: '', phone: '', year: '', semester: '', academicBranch: '', inOtherSocieties: false, societies: [], instagram: '', twitter: '', discord: '' },
+    selected: [], answers: {}, status: 'draft',
+  };
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
+  db.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,NULL,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
   res.json({ found: false, submission: initial });
 });
 app.get('/api/draft', (req, res) => {
@@ -102,18 +253,62 @@ app.post('/api/repositories/check', async (req, res) => {
 });
 app.post('/api/draft/submit', async (req, res) => {
   const s = session(req, 'draft'); if (!s) { res.status(401).json({ error: 'Resume your draft first.' }); return; }
+
+  // Server-side submission window check
+  if (!isSubmissionWindowOpen()) {
+    const now = Date.now();
+    if (now < SUBMISSION_OPENS.getTime()) {
+      res.status(403).json({ error: `Submissions open on ${SUBMISSION_OPENS.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}. Please wait.` }); return;
+    }
+    res.status(403).json({ error: 'The submission window has closed. Contact BYTE if you need assistance.' }); return;
+  }
+
   const row = getRow(s.enrollment!); if (!row || row.status !== 'draft') { res.status(409).json({ error: 'Already submitted.' }); return; }
   const payload = JSON.parse(row.payload) as Submission;
+
+  // Gate on profile completion
+  if (!isSubmissionProfileComplete(payload)) {
+    res.status(403).json({ error: 'Complete your applicant profile (Step 1) before submitting.' }); return;
+  }
+
   const errors = validateSubmission(payload, true);
   if (errors.length) { res.status(400).json({ error: errors[0] }); return; }
   for (const track of tracks.filter(t => payload.selected.includes(t.id))) for (const field of track.fields.filter(f => f.repo)) {
     const url = payload.answers[track.id]?.[field.key];
     if (url) { const result = await checkRepository(url); if (!result.ok) { res.status(422).json({ error: `${track.name}: ${result.error}` }); return; } }
   }
+
+  // Best-effort Drive accessibility check (non-blocking warning)
+  const warnings: string[] = [];
+  const deptAnswers = payload.deptAnswers || {};
+  for (const deptId of payload.selected) {
+    const config = getDeptConfig(deptId);
+    if (!config) continue;
+    for (const field of config.globalFields) {
+      if (field.urlType === 'drive-folder' && deptAnswers[deptId]?.[field.key]) {
+        const warning = await checkDriveAccessibility(String(deptAnswers[deptId][field.key]));
+        if (warning) warnings.push(`${config.name}: ${warning}`);
+      }
+    }
+  }
+
+  // Check GitHub repos from dept answers too
+  for (const deptId of payload.selected) {
+    const config = getDeptConfig(deptId);
+    if (!config) continue;
+    const answers = deptAnswers[deptId] || {};
+    for (const field of [...config.globalFields, ...config.tasks.flatMap(t => t.fields)]) {
+      if (field.urlType === 'github' && answers[field.key]) {
+        const result = await checkRepository(answers[field.key]);
+        if (!result.ok) { res.status(422).json({ error: `${config.name}: ${result.error}` }); return; }
+      }
+    }
+  }
+
   const now = new Date().toISOString();
   const result = db.prepare('UPDATE submissions SET payload=?,status=\'submitted\',updated_at=?,submitted_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify({ ...payload, status: 'submitted', submittedAt: now, updatedAt: now }), now, now, s.enrollment);
   if (!result.changes) { res.status(409).json({ error: 'Already submitted.' }); return; }
-  clear(req, res, 'draft'); res.json({ submittedAt: now });
+  clear(req, res, 'draft'); res.json({ submittedAt: now, warnings: warnings.length ? warnings : undefined });
 });
 app.post('/api/admin/login', (req, res) => {
   if (limited(req, 'login', 8)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
@@ -131,6 +326,101 @@ app.get('/api/admin/submissions', (req, res) => {
   const rows = db.prepare('SELECT * FROM submissions ORDER BY updated_at DESC').all() as Row[];
   res.json(rows.map(row => ({ ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at })));
 });
+
+// ── Data Export (CSV) ───────────────────────────────────────────────────────
+app.get('/api/admin/export', (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const rows = db.prepare('SELECT * FROM submissions ORDER BY updated_at DESC').all() as Row[];
+
+  // Build CSV
+  const headers = [
+    'Name', 'Enrollment', 'Email', 'Phone', 'Academic Branch', 'Year', 'Semester',
+    'In Other Societies', 'Societies', 'Instagram', 'Twitter/X', 'Discord',
+    'Status', 'Selected Tracks', 'Submitted At', 'Updated At',
+  ];
+
+  // Add columns for each department's global fields and task fields
+  for (const dept of deptConfigs) {
+    for (const field of dept.globalFields) {
+      headers.push(`${dept.name} - ${field.label}`);
+    }
+    for (const task of dept.tasks) {
+      for (const field of task.fields) {
+        if (field.type !== 'toggle') {
+          headers.push(`${dept.name} [${task.name}] - ${field.label}`);
+        }
+      }
+    }
+  }
+
+  // Also include legacy track fields for backward compat
+  for (const track of tracks) {
+    if (!deptConfigs.some(d => d.id === track.id)) {
+      for (const field of track.fields) {
+        headers.push(`${track.name} - ${field.label}`);
+      }
+    }
+  }
+
+  function escapeCSV(val: string): string {
+    if (!val) return '';
+    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+      return '"' + val.replace(/"/g, '""') + '"';
+    }
+    return val;
+  }
+
+  const csvRows = [headers.map(escapeCSV).join(',')];
+  for (const row of rows) {
+    const data = JSON.parse(row.payload) as Submission;
+    const s = data.student;
+    const deptAnswers = data.deptAnswers || {};
+    const values: string[] = [
+      s.name, s.enrollment, s.email, s.phone,
+      s.academicBranch || '', s.year || '', s.semester || '',
+      s.inOtherSocieties ? 'Yes' : 'No',
+      (s.societies || []).join('; '),
+      s.instagram || '', s.twitter || '', s.discord || '',
+      data.status,
+      data.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join('; '),
+      row.submitted_at || '',
+      row.updated_at || '',
+    ];
+
+    // Add department answers
+    for (const dept of deptConfigs) {
+      const answers = deptAnswers[dept.id] || {};
+      for (const field of dept.globalFields) {
+        const val = answers[field.key] !== undefined ? answers[field.key] : (data.answers?.[dept.id]?.[field.key] || '');
+        values.push(Array.isArray(val) ? val.join('; ') : String(val || ''));
+      }
+      for (const task of dept.tasks) {
+        for (const field of task.fields) {
+          if (field.type !== 'toggle') {
+            const val = answers[field.key] !== undefined ? answers[field.key] : '';
+            values.push(Array.isArray(val) ? val.join('; ') : String(val || ''));
+          }
+        }
+      }
+    }
+
+    // Add legacy track answers
+    for (const track of tracks) {
+      if (!deptConfigs.some(d => d.id === track.id)) {
+        for (const field of track.fields) {
+          values.push(data.answers?.[track.id]?.[field.key] || '');
+        }
+      }
+    }
+    csvRows.push(values.map(escapeCSV).join(','));
+  }
+
+  const csv = csvRows.join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="byte-submissions-${new Date().toISOString().split('T')[0]}.csv"`);
+  res.send(csv);
+});
+
 const dist = resolve('./dist');
 if (existsSync(dist)) {
   app.use(express.static(dist));
