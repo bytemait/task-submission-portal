@@ -1,4 +1,5 @@
 import { tracks, type Submission } from '../shared/tracks.ts';
+import { deptConfigs } from '../shared/submissionConfig.ts';
 
 /**
  * Escapes a cell according to RFC 4180 and protects against CSV formula injection.
@@ -26,25 +27,12 @@ export function escapeCsvCell(raw: unknown): string {
  * dynamically mapping tracks and fields based on shared/tracks.ts.
  */
 export function buildSubmissionsCsv(submissions: Submission[]): string {
-  // Base headers for applicant identification
+  // Base headers for applicant identification.
   const headers = [
-    'Enrollment',
-    'Name',
-    'Email',
-    'Phone',
-    'Department',
-    'Year / Semester',
-    'Other Societies',
-    'Instagram',
-    'Twitter/X',
-    'Discord',
-    'Status',
-    'Submitted At',
-    'Last Updated',
-    'Selected Tracks'
+    'Enrollment', 'Name', 'Email', 'Phone', 'Department', 'Year / Semester', 'Other Societies',
+    'Instagram', 'Twitter/X', 'Discord', 'Status', 'Submitted At', 'Last Updated', 'Selected Tracks',
+    'Academic Branch', 'Semester', 'Societies',
   ];
-
-  // Dynamic track headers
   const trackColumns: { trackId: string; fieldKey: string; header: string }[] = [];
   for (const track of tracks) {
     for (const field of track.fields) {
@@ -53,6 +41,24 @@ export function buildSubmissionsCsv(submissions: Submission[]): string {
       headers.push(header);
     }
   }
+  const departmentColumns: { deptId: string; fieldKey: string; header: string }[] = [];
+
+  for (const dept of deptConfigs) {
+    for (const field of dept.globalFields) {
+      const header = `${dept.name} - ${field.label}`;
+      departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+      headers.push(header);
+    }
+    for (const task of dept.tasks) {
+      for (const field of task.fields) {
+        if (field.type === 'toggle') continue;
+        const header = `${dept.name} [${task.name}] - ${field.label}`;
+        departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+        headers.push(header);
+      }
+    }
+  }
+
 
   const rows: string[] = [headers.map(escapeCsvCell).join(',')];
 
@@ -69,18 +75,25 @@ export function buildSubmissionsCsv(submissions: Submission[]): string {
       escapeCsvCell(s.student.dept || ''),
       escapeCsvCell(s.student.year),
       escapeCsvCell(s.student.otherSocieties || ''),
-      escapeCsvCell(s.student.socials?.instagram || ''),
-      escapeCsvCell(s.student.socials?.twitter || ''),
-      escapeCsvCell(s.student.socials?.discord || ''),
+      escapeCsvCell(s.student.instagram || s.student.socials?.instagram || ''),
+      escapeCsvCell(s.student.twitter || s.student.socials?.twitter || ''),
+      escapeCsvCell(s.student.discord || s.student.socials?.discord || ''),
       escapeCsvCell(s.status),
       escapeCsvCell(s.submittedAt || ''),
       escapeCsvCell(s.updatedAt || ''),
-      escapeCsvCell(selectedTrackNames)
+      escapeCsvCell(selectedTrackNames),
+      escapeCsvCell(s.student.academicBranch || ''),
+      escapeCsvCell(s.student.semester || ''),
+      escapeCsvCell((s.student.societies || []).join('; ')),
     ];
 
     for (const col of trackColumns) {
-      const val = s.answers?.[col.trackId]?.[col.fieldKey] || '';
-      row.push(escapeCsvCell(val));
+      row.push(escapeCsvCell(s.answers?.[col.trackId]?.[col.fieldKey] || ''));
+    }
+
+    for (const col of departmentColumns) {
+      const value = s.deptAnswers?.[col.deptId]?.[col.fieldKey] ?? s.answers?.[col.deptId]?.[col.fieldKey] ?? '';
+      row.push(escapeCsvCell(Array.isArray(value) ? value.join('; ') : value));
     }
 
     rows.push(row.join(','));

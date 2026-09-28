@@ -29,11 +29,17 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     const cookie = created.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     const draft = created.data.submission;
     draft.student.email = 'test@example.com'; draft.student.phone = '9876543210'; draft.student.dept = 'CSE'; draft.student.year = '2nd year (Sem 3)';
-    draft.selected = ['graphic-design']; draft.answers = { 'graphic-design': { work: 'https://example.com/portfolio' } };
+    draft.student.semester = '3'; draft.student.academicBranch = 'CSE';
+    draft.selected = ['outreach']; draft.answers = { 'outreach': { work: 'https://example.com/portfolio' } };
+    draft.deptAnswers = { outreach: {
+      docUrl: 'https://drive.google.com/file/d/abc123',
+      docPublic: true, fileName: true, taskOrder: true,
+      noRealContact: true, limitsRespected: true, llmDisclosure: true, q6Real: true,
+    } };
     assert.equal((await call('/draft', 'PUT', draft, cookie)).response.status, 200);
     const recovered = await call('/draft/recover', 'POST', { name: 'test   student', enrollment: '12345678' });
     assert.equal(recovered.data.found, true);
-    assert.equal(recovered.data.submission.answers['graphic-design'].work, draft.answers['graphic-design'].work);
+    assert.equal(recovered.data.submission.answers['outreach'].work, draft.answers['outreach'].work);
     const recoveredCookie = recovered.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     assert.equal((await call('/draft/submit', 'POST', {}, recoveredCookie)).response.status, 200);
     assert.equal((await call('/draft', 'PUT', draft, recoveredCookie)).response.status, 401);
@@ -45,6 +51,7 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     const listing = await call('/admin/submissions', 'GET', undefined, adminCookie);
     assert.equal(listing.data.length, 1);
     assert.equal(listing.data[0].status, 'submitted');
+
 
     // Test unauthenticated export
     const unauthExport = await fetch(base + '/admin/export.csv');
@@ -66,6 +73,12 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.equal(jsonData.length, 1);
     assert.equal(jsonData[0].student.enrollment, '12345678');
 
+    const exportRes = await fetch(base + '/admin/export.csv', { headers: { cookie: adminCookie } });
+    assert.equal(exportRes.status, 200);
+    const csv = await exportRes.text();
+    assert.ok(csv.includes('Name,Email,Phone'));
+    assert.ok(csv.includes('Test Student'));
+    assert.ok(csv.includes('Outreach'));
     await call('/admin/logout', 'POST', {}, adminCookie);
     assert.equal((await call('/admin/submissions', 'GET', undefined, adminCookie)).response.status, 401);
   } finally { process.kill(); rmSync(dir, { recursive: true, force: true }); }

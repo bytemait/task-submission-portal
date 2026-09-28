@@ -32,6 +32,7 @@ const demo: Field = { key: 'demo', label: 'Live demo or project video', type: 'u
 const note: Field = { key: 'notes', label: 'Tell us about your approach', type: 'textarea', hint: 'What did you build? What was the hardest part?' };
 const asset: Field = { key: 'work', label: 'Link to your work', type: 'url', required: true, hint: 'A publicly accessible Drive, Figma, Behance or portfolio link.' };
 export const tracks: Track[] = [
+  { id: 'ml', name: 'ML Research / Applied ML', category: 'INTELLIGENCE', color: '#d3c8ff', fields: [repo, demo, note] },
   { id: 'app-dev', name: 'App Development', category: 'BUILD', color: '#bbf06c', fields: [repo, demo, note] },
   { id: 'web-dev', name: 'Web Development', category: 'BUILD', color: '#bbf06c', fields: [repo, demo, note] },
   { id: 'ml-research', name: 'ML Research', category: 'INTELLIGENCE', color: '#d3c8ff', fields: [repo, { key: 'paper', label: 'Research write-up or report', type: 'url' }, note] },
@@ -49,23 +50,37 @@ export type Student = {
   enrollment: string;
   email: string;
   phone: string;
-  dept: string;
   year: string;
+  /** Legacy profile fields retained for existing drafts and exports. */
+  dept?: string;
   otherSocieties?: string;
   socials?: {
     instagram?: string;
     twitter?: string;
     discord?: string;
   };
+  /** New profile fields — optional at type level for backward compatibility with existing rows. */
+  semester?: string;
+  academicBranch?: string;
+  inOtherSocieties?: boolean;
+  societies?: string[];
+  instagram?: string;
+  twitter?: string;
+  discord?: string;
 };
 
 export type Submission = {
   student: Student;
   selected: string[];
   answers: Record<string, Record<string, string>>;
+  /** Department-specific form data keyed by department ID and field key. */
+  deptAnswers?: Record<string, Record<string, any>>;
+  /** Selected task IDs per department. */
+  deptSelected?: Record<string, string[]>;
   status: 'draft' | 'submitted';
   updatedAt?: string;
   submittedAt?: string;
+  profileCompletedAt?: string;
 };
 
 export const emptySubmission = (): Submission => ({
@@ -76,14 +91,19 @@ export const emptySubmission = (): Submission => ({
     phone: '',
     dept: '',
     year: '',
+    semester: '',
+    academicBranch: '',
+    inOtherSocieties: false,
+    societies: [],
+    instagram: '',
+    twitter: '',
+    discord: '',
     otherSocieties: '',
-    socials: {
-      instagram: '',
-      twitter: '',
-      discord: ''
-    }
+    socials: { instagram: '', twitter: '', discord: '' },
   },
   selected: [],
   answers: {},
-  status: 'draft'
+  deptAnswers: {},
+  deptSelected: {},
+  status: 'draft',
 });
