@@ -41,19 +41,29 @@ function clear(req: express.Request, res: express.Response, role: 'admin' | 'dra
   const id = cookies(req)[role]; if (id) sessions.delete(id);
   res.clearCookie(role, { path: '/', sameSite: 'strict', secure });
 }
-// Reject cross-origin state-changing requests even if the browser sends cookies.
+// Reject cross-origin writes. Dev proxy requests retain the browser's Origin
+// while their Host becomes the API host, so explicitly allow configured UI origins.
+const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
 app.use('/api', (req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const origin = req.get('origin');
     const host = req.get('host');
-    try { if (origin && new URL(origin).host !== host) { res.status(403).json({ error: 'Invalid origin.' }); return; } }
-    catch { res.status(403).json({ error: 'Invalid origin.' }); return; }
+    try {
+      if (origin && (!['http:', 'https:'].includes(new URL(origin).protocol) ||
+        (new URL(origin).host !== host && !allowedOrigins.has(origin)))) {
+        res.status(403).json({ error: 'Invalid origin.' }); return;
+      }
+    } catch { res.status(403).json({ error: 'Invalid origin.' }); return; }
   }
   next();
 });
 type Row = { enrollment: string; name_key: string; payload: string; status: string; updated_at: string; submitted_at: string | null };
 const getRow = (enrollment: string) => db.prepare('SELECT * FROM submissions WHERE enrollment=?').get(enrollment) as Row | undefined;
 const cleanName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+app.get('/api/health', (_req, res) => {
+  try { db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
+  catch { res.status(503).json({ status: 'unavailable' }); }
+});
 app.get('/api/tracks', (_req, res) => res.json(tracks));
 app.post('/api/draft/recover', (req, res) => {
   if (limited(req, 'recover', 12)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
@@ -127,4 +137,18 @@ if (existsSync(dist)) {
   app.get('/{*path}', (_req, res) => res.sendFile(resolve(dist, 'index.html')));
 }
 const port = Number(process.env.PORT || 3001);
-app.listen(port, () => console.log(`BYTE API listening on http://localhost:${port}`));
+const server = app.listen(port, '0.0.0.0', () => console.log(`BYTE API listening on port ${port}`));
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}; closing server and database.`);
+  server.close(error => {
+    try { db.close(); }
+    catch (closeError) { console.error('Failed to close SQLite database cleanly:', closeError); process.exitCode = 1; }
+    if (error) { console.error('Failed to close HTTP server cleanly:', error); process.exitCode = 1; }
+  });
+  setTimeout(() => { console.error('Graceful shutdown timed out.'); process.exit(1); }, 10_000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

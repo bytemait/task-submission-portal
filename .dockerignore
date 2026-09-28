@@ -1,0 +1,21 @@
+# Never put local data, credentials, or development files in the build context.
+.git
+.gitignore
+.codegraph
+node_modules
+dist
+data
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+coverage
+.nyc_output
+.DS_Store
+README.md
+compose.yaml
+Dockerfile
+server/*.test.ts

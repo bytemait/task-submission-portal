@@ -1,0 +1,45 @@
+services:
+  app:
+    image: byte-task-submission-portal:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DB_PATH: /app/data/submissions.sqlite
+      # Required behind the documented HTTPS reverse proxy.
+      SECURE_COOKIES: "${SECURE_COOKIES:-0}"
+    ports:
+      # Local-only by default. Set BIND_ADDRESS=0.0.0.0 only when external
+      # access is intentional and protected by a trusted TLS reverse proxy.
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3001}:3001"
+    volumes:
+      - submissions-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=1770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  submissions-data:

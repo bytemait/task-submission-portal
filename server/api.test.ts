@@ -20,7 +20,10 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     let ready = false;
     for (let i = 0; i < 50; i++) { try { await call('/tracks'); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); } }
     assert.ok(ready, 'server started');
+    assert.equal((await call('/health')).response.status, 200);
     assert.equal((await call('/admin/submissions')).response.status, 401);
+    const foreignOrigin = await fetch(base + '/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: JSON.stringify({ password }) });
+    assert.equal(foreignOrigin.status, 403);
     const created = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678' });
     assert.equal(created.data.found, false);
     const cookie = created.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
