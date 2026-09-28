@@ -573,7 +573,9 @@ const videoEditDept: DeptConfig = {
   globalFields: [
     { key: 'driveUrl', label: 'Google Drive link to final MP4', type: 'url', urlType: 'drive-file', required: true,
       hint: 'Public Google Drive file link to your final video.' },
-    { key: 'software', label: 'Software / video-editing apps used', type: 'text', required: true },
+    { key: 'software', label: 'Name of software / video editing app used', type: 'text', required: true },
+    { key: 'portfolioUrl', label: 'Past work portfolio link', type: 'url', urlType: 'any-https',
+      hint: 'Optional link to your past video editing work.' },
     { key: 'creativeNote', label: 'Creative note', type: 'textarea', required: true, wordLimit: 50,
       hint: 'Explain your concept or approach (max 50 words).' },
   ],
@@ -633,7 +635,10 @@ const gdDept: DeptConfig = {
   color: '#ffd9ec',
   type: 'drive',
   helperHint: 'Complete at least one task. Both may be submitted. Private or inaccessible links will not be evaluated.',
-  globalFields: [],
+  globalFields: [
+    { key: 'portfolioUrl', label: 'Past work portfolio link', type: 'url', urlType: 'any-https',
+      hint: 'Optional link to your past graphic design work.' },
+  ],
   globalCheckboxes: [],
   tasks: [
     {
@@ -643,10 +648,9 @@ const gdDept: DeptConfig = {
       fields: [
         { key: 'driveUrl', label: 'Google Drive link to final PNG/JPG', type: 'url', urlType: 'drive-file', required: true,
           hint: 'Public Google Drive file link to your poster.' },
-        { key: 'software', label: 'Design software used', type: 'text', required: true },
-        { key: 'canvaUrl', label: 'Editable Canva link', type: 'url', urlType: 'any-https',
-          conditionalOn: 'software:Canva', required: true,
-          hint: 'Required when using Canva — share the editable link.' },
+        { key: 'software', label: 'Name of software used', type: 'text', required: true },
+        { key: 'canvaUrl', label: 'Editable link (if made on Canva)', type: 'url', urlType: 'any-https',
+          conditionalOn: 'software:Canva', hint: 'Optional editable Canva design link.' },
         { key: 'concept', label: 'Concept explanation', type: 'textarea', required: true, wordLimit: 50,
           hint: 'Explain your design concept (max 50 words).' },
       ],
@@ -670,9 +674,8 @@ const gdDept: DeptConfig = {
           hint: 'Public Google Drive file link to your merch design.' },
         { key: 'software2', label: 'Design software used', type: 'text',
           conditionalOn: 'task2Attempted:checked', required: true },
-        { key: 'canvaUrl2', label: 'Editable Canva link', type: 'url', urlType: 'any-https',
-          conditionalOn: 'software2:Canva',
-          hint: 'Required when using Canva.' },
+        { key: 'canvaUrl2', label: 'Editable link (if made on Canva)', type: 'url', urlType: 'any-https',
+          conditionalOn: 'software2:Canva', hint: 'Optional editable Canva design link.' },
         { key: 'references', label: 'Resources, references, or inspirations used', type: 'url-list',
           conditionalOn: 'task2Attempted:checked', required: true,
           hint: 'At least one link. Add references and inspirations.' },

@@ -77,7 +77,7 @@ The wizard is at http://localhost:5173/; admin login at http://localhost:5173/lo
 ## Flow
 
 1. Applicants enter profile details (name, enrollment, contact, academic branch, year/semester, societies, optional social handles); the server recovers or creates a draft. Saves are debounced, serialized, and kept in local session storage for recovery. Same name and enrollment on another device resumes that draft.
-2. Applicants choose one or more departments, complete the configured department/task forms, then review their profile and answers. Year-specific task requirements and profile/field validation apply in the client and server.
+2. Applicants choose one or more departments, complete the configured department/task forms—including Graphic Design software, optional Canva edit and portfolio links, and Video Editing software and optional portfolio link—then review their profile and answers. Year-specific task requirements and profile/field validation apply in the client and server.
 3. GitHub links are checked live via GitHub's public repository API and again on final submission. Selected department Drive links receive a best-effort accessibility check. A private repository or a nonexistent one is refused.
 4. The single admin signs in at `/login`, reviews/searches/filters drafts and submissions at `/admin`, and can download CSV and JSON exports. CSV cells are escaped and protected against formula injection.
 
