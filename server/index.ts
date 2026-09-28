@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tracks, type Submission } from '../shared/tracks.ts';
 import { validateSubmission, checkRepository, normalizeEnrollment } from './validation.ts';
+import { buildSubmissionsCsv, buildSubmissionsJson } from './export.ts';
 
 const app = express();
 app.disable('x-powered-by');
@@ -74,7 +75,21 @@ app.post('/api/draft/recover', (req, res) => {
   if (row?.status === 'submitted') { res.status(409).json({ error: 'This enrollment number already has a final submission. Contact BYTE for changes.' }); return; }
   clear(req, res, 'draft'); setSession(res, 'draft', id);
   if (row) { res.json({ found: true, submission: JSON.parse(row.payload) }); return; }
-  const initial: Submission = { student: { name: name.trim(), enrollment: id, email: '', phone: '', year: '' }, selected: [], answers: {}, status: 'draft' };
+  const initial: Submission = {
+    student: {
+      name: name.trim(),
+      enrollment: id,
+      email: '',
+      phone: '',
+      dept: '',
+      year: '',
+      otherSocieties: '',
+      socials: { instagram: '', twitter: '', discord: '' }
+    },
+    selected: [],
+    answers: {},
+    status: 'draft'
+  };
   const now = new Date().toISOString();
   db.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
   res.json({ found: false, submission: initial });
@@ -130,6 +145,26 @@ app.get('/api/admin/submissions', (req, res) => {
   if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
   const rows = db.prepare('SELECT * FROM submissions ORDER BY updated_at DESC').all() as Row[];
   res.json(rows.map(row => ({ ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at })));
+});
+app.get('/api/admin/export.csv', (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const rows = db.prepare('SELECT * FROM submissions ORDER BY status DESC, updated_at DESC').all() as Row[];
+  const submissions: Submission[] = rows.map(row => ({ ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at }));
+  const csv = buildSubmissionsCsv(submissions);
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="byte-submissions-${date}.csv"`);
+  res.send(csv);
+});
+app.get('/api/admin/export.json', (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const rows = db.prepare('SELECT * FROM submissions ORDER BY status DESC, updated_at DESC').all() as Row[];
+  const submissions: Submission[] = rows.map(row => ({ ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at }));
+  const json = buildSubmissionsJson(submissions);
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="byte-submissions-${date}.json"`);
+  res.send(json);
 });
 const dist = resolve('./dist');
 if (existsSync(dist)) {

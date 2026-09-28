@@ -11,7 +11,7 @@ test('draft accepts partial answers; final requires selected track and contact',
   const draft = emptySubmission(); draft.student.name = 'Test Student'; draft.student.enrollment = '12345678';
   assert.deepEqual(validateSubmission(draft, false), []);
   assert.ok(validateSubmission(draft, true).length > 0);
-  draft.student.email = 'test@example.com'; draft.student.phone = '9876543210'; draft.student.year = '2nd year'; draft.selected = ['web-dev']; draft.answers['web-dev'] = { repo: 'https://github.com/bytemait/demo' };
+  draft.student.email = 'test@example.com'; draft.student.phone = '9876543210'; draft.student.dept = 'CSE'; draft.student.year = '2nd year (Sem 3)'; draft.selected = ['web-dev']; draft.answers['web-dev'] = { repo: 'https://github.com/bytemait/demo' };
   assert.deepEqual(validateSubmission(draft, true), []);
   draft.answers['web-dev'].repo = 'https://evil.com/repo';
   assert.ok(validateSubmission(draft, true).some(e => e.includes('GitHub')));
