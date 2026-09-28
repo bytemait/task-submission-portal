@@ -36,7 +36,25 @@ function Wizard() {
   const latest = useRef(data);
   const inFlight = useRef(Promise.resolve());
   latest.current = data;
-  useEffect(() => { api<Submission>('/draft').then(d => { setData(d); setActive(true); setSaveState('Draft restored on this device'); }).catch(() => {}); }, []);
+  const normalizeLoadedSubmission = (sub: Submission): Submission => ({
+    ...emptySubmission(),
+    ...sub,
+    student: {
+      ...emptySubmission().student,
+      ...sub.student,
+      socials: {
+        ...emptySubmission().student.socials,
+        ...sub.student?.socials
+      }
+    }
+  });
+  useEffect(() => {
+    api<Submission>('/draft').then(d => {
+      setData(normalizeLoadedSubmission(d));
+      setActive(true);
+      setSaveState('Draft restored on this device');
+    }).catch(() => {});
+  }, []);
   const save = async (snapshot = latest.current, seq = version.current) => {
     inFlight.current = inFlight.current.catch(() => {}).then(async () => {
       if (seq < saved.current) return;
@@ -64,15 +82,28 @@ function Wizard() {
   async function recover() {
     if (active || recovering || data.student.name.trim().length < 2 || data.student.enrollment.trim().length < 4) return false;
     setRecovering(true); setError('');
-    try { const result = await post<{ found: boolean; submission: Submission }>('/draft/recover', { name: data.student.name, enrollment: data.student.enrollment }); const restored = result.found ? result.submission : { ...result.submission, student: { ...data.student, name: result.submission.student.name, enrollment: result.submission.student.enrollment } }; setData(restored); latest.current = restored; version.current = result.found ? 0 : 1; saved.current = 0; setFound(result.found); setActive(true); setSaveState(result.found ? 'Existing draft recovered' : 'Draft started · autosave is on'); return true; }
+    try {
+      const result = await post<{ found: boolean; submission: Submission }>('/draft/recover', { name: data.student.name, enrollment: data.student.enrollment });
+      const raw = result.found ? result.submission : { ...result.submission, student: { ...data.student, name: result.submission.student.name, enrollment: result.submission.student.enrollment } };
+      const restored = normalizeLoadedSubmission(raw);
+      setData(restored);
+      latest.current = restored;
+      version.current = result.found ? 0 : 1;
+      saved.current = 0;
+      setFound(result.found);
+      setActive(true);
+      setSaveState(result.found ? 'Existing draft recovered' : 'Draft started · autosave is on');
+      return true;
+    }
     catch (e) { setError((e as Error).message); return false; }
     finally { setRecovering(false); }
   }
   async function next() {
     setError('');
     if (step === 0) {
-      if (!data.student.name.trim() || !data.student.enrollment.trim() || !data.student.email.trim() || !data.student.phone.trim() || !data.student.dept.trim() || !data.student.year) { setError('Please complete all required details to continue.'); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.student.email)) { setError('Please enter a valid email address.'); return; }
+      const s = data.student;
+      if (!s.name?.trim() || !s.enrollment?.trim() || !s.email?.trim() || !s.phone?.trim() || !s.dept?.trim() || !s.year?.trim()) { setError('Please complete all required details to continue.'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim())) { setError('Please enter a valid email address.'); return; }
       if (!active && !(await recover())) return;
     }
     if (step === 1 && !data.selected.length) { setError('Choose at least one track to continue.'); return; }
