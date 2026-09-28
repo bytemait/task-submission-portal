@@ -76,10 +76,10 @@ The wizard is at http://localhost:5173/; admin login at http://localhost:5173/lo
 
 ## Flow
 
-1. Student enters name and enrollment number (other contact details follow); the server recovers or creates a draft. Same name and enrollment on another device resumes it. Saves are debounced and serialized; final submission is immutable.
-2. Student picks any combination of the 11 tracks, fills out each track's fields and reviews answers.
-3. GitHub links are checked live via GitHub's public repository API and again on final submission. A private repository and a nonexistent one both appear as 404 without authorization; both are refused. GitHub outages/rate limits fail closed, not open.
-4. The single admin signs in at `/login` with only a password, then reviews/searches/filters drafts and submitted entries at `/admin`.
+1. Applicants enter profile details (name, enrollment, contact, academic branch, year/semester, societies, optional social handles); the server recovers or creates a draft. Saves are debounced, serialized, and kept in local session storage for recovery. Same name and enrollment on another device resumes that draft.
+2. Applicants choose one or more departments, complete the configured department/task forms, then review their profile and answers. Year-specific task requirements and profile/field validation apply in the client and server.
+3. GitHub links are checked live via GitHub's public repository API and again on final submission. Selected department Drive links receive a best-effort accessibility check. A private repository or a nonexistent one is refused.
+4. The single admin signs in at `/login`, reviews/searches/filters drafts and submissions at `/admin`, and can download CSV and JSON exports. CSV cells are escaped and protected against formula injection.
 
 ## Security and launch caveats
 
