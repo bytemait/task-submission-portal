@@ -156,8 +156,8 @@ app.put('/api/profile', (req, res) => {
   const body = req.body?.profile;
   if (!body || typeof body !== 'object') { res.status(400).json({ error: 'Invalid profile data.' }); return; }
 
-  // Reject unknown fields
-  const allowed = new Set(['name', 'email', 'phone', 'enrollment', 'academicBranch', 'year', 'semester', 'inOtherSocieties', 'societies', 'instagram', 'twitter', 'discord']);
+  // Reject unknown fields (include legacy fields for backward compatibility with existing drafts)
+  const allowed = new Set(['name', 'email', 'phone', 'enrollment', 'academicBranch', 'year', 'semester', 'inOtherSocieties', 'societies', 'instagram', 'twitter', 'discord', 'dept', 'otherSocieties', 'socials']);
   for (const k of Object.keys(body)) {
     if (!allowed.has(k)) { res.status(400).json({ error: `Unknown field: ${k}` }); return; }
   }
@@ -248,7 +248,7 @@ app.post('/api/draft/recover', (req, res) => {
     status: 'draft'
   };
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,NULL,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
+  db.prepare('INSERT INTO submissions (enrollment, name_key, payload, status, updated_at, submitted_at, profile_completed_at) VALUES (?,?,?,?,?,NULL,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
   res.json({ found: false, submission: initial });
 });
 app.get('/api/draft', (req, res) => {
