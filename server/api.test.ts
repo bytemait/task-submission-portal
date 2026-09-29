@@ -63,7 +63,7 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.ok(csvExport.headers.get('content-type')?.includes('text/csv'));
     const csvText = await csvExport.text();
     assert.ok(csvText.includes('12345678,Test Student,test@example.com'));
-    assert.ok(csvText.includes('https://example.com/portfolio'));
+    assert.ok(csvText.includes('https://drive.google.com/file/d/abc123'));
 
     // Test authenticated JSON export
     const jsonExport = await fetch(base + '/admin/export.json', { headers: { cookie: adminCookie } });
