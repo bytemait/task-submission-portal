@@ -428,24 +428,26 @@ function SocietyList({ items, onChange, error }: { items: string[]; onChange: (v
 }
 
 // ── Step 1: Applicant Details ───────────────────────────────────────────────
-function ApplicantDetails({ data, onChange, errors, onBlur, disabled }: {
+function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disabled }: {
   data: Student; onChange: (key: keyof Student, value: any) => void;
+  onBatchChange: (updates: Partial<Student>) => void;
   errors: ProfileErrors; onBlur: (key: string) => void; disabled?: boolean;
 }) {
   const yearNum = data.year ? parseInt(data.year, 10) : 0;
   const validSemesters = yearNum >= 1 && yearNum <= 4 ? semestersForYear(yearNum) : null;
 
   const handleYearChange = (v: string) => {
-    onChange('year', v);
-    // Clear invalid semester when year changes
+    // Atomic update: set year and conditionally clear invalid semester in one call
+    const updates: Partial<Student> = { year: v };
     if (v && data.semester) {
       const y = parseInt(v, 10);
       const s = parseInt(data.semester, 10);
       if (y >= 1 && y <= 4) {
         const [lo, hi] = semestersForYear(y);
-        if (s < lo || s > hi) onChange('semester', '');
+        if (s < lo || s > hi) updates.semester = '';
       }
     }
+    onBatchChange(updates);
   };
 
   return <>
@@ -512,11 +514,11 @@ function ApplicantDetails({ data, onChange, errors, onBlur, disabled }: {
         <label>Are you in any other societies? <span className="optional">(optional)</span></label>
         <div className="toggle-group">
           <button type="button" className={'toggle-btn' + (data.inOtherSocieties === true ? ' active' : '')}
-            onClick={() => { onChange('inOtherSocieties', true); if (!(data.societies || []).length) onChange('societies', ['']); }}>Yes</button>
+            onClick={() => onBatchChange({ inOtherSocieties: true, ...((data.societies || []).length === 0 ? { societies: [''] } : {}) })}>Yes</button>
           <button type="button" className={'toggle-btn' + (data.inOtherSocieties === false || data.inOtherSocieties === undefined ? ' active' : '')}
-            onClick={() => { onChange('inOtherSocieties', false); onChange('societies', []); }}>No</button>
+            onClick={() => onBatchChange({ inOtherSocieties: false, societies: [] })}>No</button>
         </div>
-        {data.inOtherSocieties && <SocietyList items={data.societies || ['']} onChange={v => onChange('societies', v)} error={errors.societies}/>}
+        {data.inOtherSocieties && <SocietyList items={(data.societies || []).length > 0 ? data.societies! : ['']} onChange={v => onChange('societies', v)} error={errors.societies}/>}
       </div>
     </div>
 
@@ -683,8 +685,20 @@ function Wizard() {
 
   function update(next: Submission) { version.current++; setData(next); setError(''); setDirty(true); }
   function student(key: keyof Student, value: any) {
-    const next = { ...data, student: { ...data.student, [key]: value } };
-    update(next);
+    setData(prev => {
+      const next = { ...prev, student: { ...prev.student, [key]: value } };
+      latest.current = next;
+      return next;
+    });
+    version.current++; setError(''); setDirty(true);
+  }
+  function studentBatch(updates: Partial<Student>) {
+    setData(prev => {
+      const next = { ...prev, student: { ...prev.student, ...updates } };
+      latest.current = next;
+      return next;
+    });
+    version.current++; setError(''); setDirty(true);
   }
 
   const handleProfileBlur = useCallback((field: string) => {
@@ -738,8 +752,10 @@ function Wizard() {
     // Save profile to server
     try {
       setSaveState('Saving profile…');
+      // Send only recognized profile fields (exclude legacy fields like dept, otherSocieties, socials)
+      const { name, enrollment, email, phone, academicBranch, year, semester, inOtherSocieties, societies, instagram, twitter, discord } = data.student;
       const result = await put<{ updatedAt: string; profileComplete: boolean; errors?: ProfileErrors }>('/profile', {
-        profile: data.student,
+        profile: { name, enrollment, email, phone, academicBranch, year, semester, inOtherSocieties, societies, instagram, twitter, discord },
       });
       setProfileComplete(result.profileComplete);
       if (result.errors) {
@@ -787,11 +803,22 @@ function Wizard() {
         // Global required fields
         for (const field of config.globalFields) {
           if (!isFieldActive(field, answers)) continue;
-          if (field.required && (!answers[field.key] || (typeof answers[field.key] === 'string' && !answers[field.key].trim()))) {
-            setError(`${config.name}: ${field.label} is required.`); return;
+          const val = answers[field.key];
+          if (field.required) {
+            if (field.type === 'multi-select') {
+              if (!Array.isArray(val) || val.length < (field.minSelect || 1)) {
+                setError(`${config.name}: ${field.label} — select at least ${field.minSelect || 1}.`); return;
+              }
+            } else if (field.type === 'url-list') {
+              if (!Array.isArray(val) || val.filter((v: string) => v?.trim()).length < 1) {
+                setError(`${config.name}: ${field.label} — at least one entry is required.`); return;
+              }
+            } else if (!val || (typeof val === 'string' && !val.trim())) {
+              setError(`${config.name}: ${field.label} is required.`); return;
+            }
           }
-          if (answers[field.key] && field.urlType) {
-            const urlErr = validateFieldUrl(String(answers[field.key]), field.urlType);
+          if (val && field.urlType) {
+            const urlErr = validateFieldUrl(String(val), field.urlType);
             if (urlErr) { setError(`${config.name}: ${urlErr}`); return; }
           }
         }
@@ -816,8 +843,19 @@ function Wizard() {
           for (const field of task.fields) {
             if (field.type === 'toggle') continue;
             if (!isFieldActive(field, answers)) continue;
-            if (field.required && (!answers[field.key] || (typeof answers[field.key] === 'string' && !answers[field.key].trim()))) {
-              setError(`${config.name} / ${task.name}: ${field.label} is required.`); return;
+            const val = answers[field.key];
+            if (field.required) {
+              if (field.type === 'multi-select') {
+                if (!Array.isArray(val) || val.length < (field.minSelect || 1)) {
+                  setError(`${config.name} / ${task.name}: ${field.label} — select at least ${field.minSelect || 1}.`); return;
+                }
+              } else if (field.type === 'url-list') {
+                if (!Array.isArray(val) || val.filter((v: string) => v?.trim()).length < 1) {
+                  setError(`${config.name} / ${task.name}: ${field.label} — at least one entry is required.`); return;
+                }
+              } else if (!val || (typeof val === 'string' && !val.trim())) {
+                setError(`${config.name} / ${task.name}: ${field.label} is required.`); return;
+              }
             }
           }
           for (const cb of task.checkboxes) {
@@ -868,7 +906,7 @@ function Wizard() {
 
   {step === 0 && <>
     {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> We found your draft and picked up where you left off.</div>}
-    <ApplicantDetails data={data.student} onChange={student} errors={profileErrors} onBlur={handleProfileBlur} disabled={active && step === 0 && false /* Name/enrollment lock handled server-side */}/>
+    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active && step === 0 && false /* Name/enrollment lock handled server-side */}/>
     <div className="notice"><ShieldCheck size={19}/><span>Already started? Enter the same name and enrollment number and we'll recover your draft. Anyone with these details may access it; avoid entering sensitive information.</span></div>
   </>}
 
