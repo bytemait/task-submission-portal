@@ -76,9 +76,9 @@ export interface DeptConfig {
 
 // ── URL Validators (used both client and server) ────────────────────────────
 
-const DRIVE_FOLDER_RE = /^https:\/\/drive\.google\.com\/drive\/folders\/[a-zA-Z0-9_-]+(\?[a-zA-Z0-9_=&]*)?$/;
-const DRIVE_FILE_RE = /^https:\/\/drive\.google\.com\/file\/d\/[a-zA-Z0-9_-]+(\/(view|edit|preview))?(\?[a-zA-Z0-9_=&]*)?$/;
-const GOOGLE_DOC_RE = /^https:\/\/docs\.google\.com\/document\/d\/[a-zA-Z0-9_-]+(\/[a-zA-Z]+)?(\?[a-zA-Z0-9_=&]*)?$/;
+const DRIVE_FOLDER_RE = /^https:\/\/drive\.google\.com\/drive\/folders\/[a-zA-Z0-9_-]+\/?(\?[a-zA-Z0-9_=&.%+-]*)?(#.*)?$/;
+const DRIVE_FILE_RE = /^https:\/\/drive\.google\.com\/file\/d\/[a-zA-Z0-9_-]+(\/(view|edit|preview))?\/?(\?[a-zA-Z0-9_=&.%+-]*)?(#.*)?$/;
+const GOOGLE_DOC_RE = /^https:\/\/docs\.google\.com\/document\/d\/[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)?\/?(\?[a-zA-Z0-9_=&.%+-]*)?(#.*)?$/;
 const GITHUB_REPO_RE = /^https:\/\/github\.com\/[a-zA-Z0-9_-]{1,39}\/[a-zA-Z0-9._-]{1,100}\/?$/;
 const WOKWI_RE = /^https:\/\/wokwi\.com\/projects\/\d+\/?$/;
 
@@ -226,13 +226,20 @@ const mlDept: DeptConfig = {
       name: 'The Agentic Task',
       tag: 'Basic',
       fields: [
-        { key: 'repo', label: 'GitHub repo URL', type: 'url', urlType: 'github', required: true, hint: 'Repository with your data analysis agent code.' },
-        { key: 'readme', label: 'README / approach note', type: 'select', required: true,
-          options: [{ value: '', label: 'Select…' }, { value: 'in-repo', label: 'In the repo README' }, { value: 'external', label: 'External link' }] },
-        { key: 'readmeUrl', label: 'Approach note URL', type: 'url', urlType: 'any-https', conditionalOn: 'readme:external',
-          hint: 'Link to your README or approach document if not in the repo.' },
-        { key: 'demo', label: 'Demo / run instructions link', type: 'url', urlType: 'any-https', hint: 'Optional: link to a demo or deployment.' },
-        // TODO: Full submission format from Google Doc not provided — add remaining fields when available.
+        { key: 'agenticRepo', label: 'GitHub repository URL', type: 'url', urlType: 'github', required: true,
+          hint: 'Public repo with your data-analysis agent code.' },
+        { key: 'agenticCommits', label: 'My repository has chronological commits showing my work over time, not a single dump.', type: 'checkbox', required: true },
+        { key: 'fiveTools', label: 'My agent has at least five genuinely different tools — not five wrappers around the same operation.', type: 'checkbox', required: true },
+        { key: 'readmeTools', label: 'My README lists each tool and what distinct analysis it performs.', type: 'checkbox', required: true },
+        { key: 'toolUse', label: 'The agent uses its tools to answer questions about the data, rather than returning generic model-generated responses.', type: 'checkbox', required: true },
+        { key: 'generalDatasets', label: 'The system works with datasets beyond one hard-coded example, and I can demo it with new data and questions.', type: 'checkbox', required: true },
+        { key: 'notWrapper', label: 'This is not a generic single-API wrapper (e.g. a bare model call with no real tool use).', type: 'checkbox', required: true },
+        { key: 'techStack', label: 'Stack used (APIs, open models, frameworks)', type: 'text', required: true },
+        { key: 'memoryToggle', label: 'Optional — brownie points: Attempted persistent memory across sessions?', type: 'toggle' },
+        { key: 'memoryDescription', label: 'Briefly describe what your memory retains and how it is used', type: 'text', required: true,
+          conditionalOn: 'memoryToggle:checked', hint: 'What does the agent remember between sessions and how does it use that memory?' },
+        { key: 'agenticDemo', label: 'Demo or walkthrough link', type: 'url', urlType: 'any-https',
+          hint: 'Live link, shareable build, or screen-recording link — very much preferred.' },
       ],
       checkboxes: [],
     },
@@ -242,7 +249,7 @@ const mlDept: DeptConfig = {
       name: 'The Manga Task',
       tag: 'Advanced',
       fields: [
-        { key: 'repo', label: 'GitHub repo URL (training/experimentation, logs, inference code)', type: 'url', urlType: 'github', required: true },
+        { key: 'mangaRepo', label: 'GitHub repo URL (training/experimentation, logs, inference code)', type: 'url', urlType: 'github', required: true },
         { key: 'predictions', label: 'Test predictions (.jsonl)', type: 'file', accept: '.jsonl', required: true,
           hint: 'JSONL file with exactly 15 lines. Each line: { sequence_id, pages: [[{speaker, text}, …], …] }.' },
         { key: 'weightsInRepo', label: 'Trained weights / adapters are committed in the repo', type: 'checkbox' },
@@ -257,27 +264,67 @@ const mlDept: DeptConfig = {
         { key: 'citedExternal', label: 'External code/models are cited in the README.', required: true },
       ],
     },
-    // ── ML Research: Basic — TODO ──
+    // ── ML Research: Basic — Paper Craft ──
     {
       id: 'ml-research-basic',
-      name: 'ML Research Task (Basic)',
+      name: 'Paper Craft',
       tag: 'Basic',
       fields: [
-        // TODO: Title, fields, and details not yet provided. Add when available.
-        { key: 'placeholder', label: 'Submission details coming soon', type: 'text', hint: 'This task\'s submission format will be shared shortly.' },
+        { key: 'paperChoice', label: 'Paper choice', type: 'select', required: true,
+          options: [
+            { value: '', label: 'Select a paper…' },
+            { value: 'vit', label: 'An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale' },
+            { value: 'minillm', label: 'MiniLLM: On-Policy Distillation of Large Language Models' },
+            { value: 'deepseek-v3', label: 'DeepSeek-V3 Technical Report' },
+            { value: 'gqa', label: 'GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints' },
+            { value: 'dpo', label: 'Direct Preference Optimization: Your Language Model is Secretly a Reward Model' },
+            { value: 'pg-trpo', label: 'Policy Gradient Algorithms / Trust Region Policy Optimization' },
+            { value: 'pg-deepseek-r1', label: 'Policy Gradient Algorithms / DeepSeek R1: Incentivizing Reasoning Capability in LLMs via RL' },
+            { value: 'other', label: 'Other (published paper of my choice)' },
+          ] },
+        { key: 'otherPaperTitle', label: 'Paper title', type: 'text', required: true,
+          conditionalOn: 'paperChoice:other' },
+        { key: 'otherPaperUrl', label: 'Link to the paper', type: 'url', urlType: 'any-https',
+          conditionalOn: 'paperChoice:other',
+          hint: 'Optional: link to the paper you chose.' },
+        { key: 'templateUrl', label: 'Link to your completed Paper Craft Reading Template', type: 'url', urlType: 'any-https', required: true,
+          hint: 'Complete every section in your own words. Do not have an LLM fill this in.' },
+        // GitHub repo is OPTIONAL for Paper Craft — reading response, not a code task.
+        { key: 'paperRepo', label: 'GitHub repository URL', type: 'url', urlType: 'github',
+          hint: 'Optional: link to any associated code or notes repository.' },
+        { key: 'paperCommits', label: 'My repository has chronological commits showing my work over time, not a single dump.', type: 'checkbox',
+          conditionalOn: 'paperRepo:checked', required: true },
+        { key: 'paperDemo', label: 'Demo or walkthrough link', type: 'url', urlType: 'any-https',
+          hint: 'Live link, shareable build, or screen-recording link — optional but preferred.' },
       ],
-      checkboxes: [],
+      checkboxes: [
+        { key: 'readPaper', label: 'I read the full paper and completed every section of the template myself.', required: true },
+      ],
     },
-    // ── ML Research: Advanced — TODO ──
+    // ── ML Research: Advanced — The Falsification Challenge ──
     {
       id: 'ml-research-advanced',
-      name: 'ML Research Task (Advanced)',
+      name: 'The Falsification Challenge',
       tag: 'Advanced',
       fields: [
-        // TODO: Title, fields, and details not yet provided. Add when available.
-        { key: 'placeholder', label: 'Submission details coming soon', type: 'text', hint: 'This task\'s submission format will be shared shortly.' },
+        { key: 'proposalUrl', label: 'Link to your research proposal document', type: 'url', urlType: 'any-https', required: true,
+          hint: 'Google Doc or hosted document with your research proposal.' },
+        { key: 'experimentRan', label: 'Did you run any experiments?', type: 'toggle' },
+        { key: 'falsificationRepo', label: 'GitHub repository URL', type: 'url', urlType: 'github', required: true,
+          conditionalOn: 'experimentRan:checked',
+          hint: 'Public repo with experiment code, logs, and results.' },
+        { key: 'falsificationCommits', label: 'My repository has chronological commits showing my work over time, not a single dump.', type: 'checkbox',
+          required: true, conditionalOn: 'experimentRan:checked' },
+        { key: 'falsificationDemo', label: 'Demo or walkthrough link', type: 'url', urlType: 'any-https',
+          hint: 'Live link, shareable build, or screen-recording link — optional but preferred.' },
       ],
-      checkboxes: [],
+      checkboxes: [
+        { key: 'researchQuestion', label: 'States a specific research question, a falsifiable hypothesis, a null hypothesis, and at least one alternative explanation.', required: true },
+        { key: 'experimentSuite', label: 'Proposes an implementable experiment suite (dataset/synthetic data, controlled variables, architecture, training procedure, evaluation).', required: true },
+        { key: 'controls', label: 'Includes controls/baselines distinguishing simplicity bias from competing explanations.', required: true },
+        { key: 'limitations', label: 'Discusses multiple possible outcomes, limitations, confounders, and what the study cannot establish.', required: true },
+        { key: 'ownWork', label: 'The proposal and any README were written by me.', required: true },
+      ],
     },
   ],
 };
@@ -328,8 +375,8 @@ const cadDept: DeptConfig = {
     },
   ],
   yearRule: (year, selectedTaskIds) => {
-    if (CAD_TASK2_REQUIRED_FOR_2ND_YEAR && year === 2 && !selectedTaskIds.includes('cad-task2'))
-      return 'Task 2 is required for 2nd year students.';
+    if (isCadTask2Required(year) && !selectedTaskIds.includes('cad-task2'))
+      return 'Task 2 is required from 2nd year onward.';
     return null;
   },
 };
@@ -368,26 +415,31 @@ const elecDept: DeptConfig = {
         { key: 'hardware', label: 'Physical hardware instead of Wokwi?', type: 'toggle' },
         { key: 'wokwiUrl', label: 'Wokwi project URL', type: 'url', urlType: 'wokwi', conditionalOn: 'hardware:unchecked',
           hint: 'Link to your Wokwi simulation.' },
+        { key: 'linkTxt', label: 'Link.txt contains only the raw URL.', type: 'checkbox', required: true,
+          conditionalOn: 'hardware:unchecked' },
+        { key: 'hardwareDemo', label: 'Demo.mp4 included in the folder (hardware demo).', type: 'checkbox', required: true,
+          conditionalOn: 'hardware:checked' },
       ],
       checkboxes: [
-        { key: 'linkTxt', label: 'Link.txt contains only the raw URL.', required: true },
         { key: 'codeTxt', label: 'Code.txt is plain text (not .ino).', required: true },
         { key: 'rationale', label: 'Design_rationale.docx (150–250 words) covers threshold, hold-last-position, and flicker prevention.', required: true },
-        { key: 'hardwareDemo', label: 'Demo.mp4 included in the folder (hardware demo).', required: false }, // only if hardware toggle is on
       ],
     },
     {
       id: 'elec-task2',
       name: 'Task 2 — Simon Says with Heartbeat',
-      tag: 'Optional', // required for 2nd year, controlled by ELEC_TASK2_REQUIRED_FOR_2ND_YEAR
+      tag: 'Optional', // required for year >= 2, enforced by yearRule
       fields: [
         { key: 'task2Attempted', label: 'Task 2 attempted?', type: 'toggle' },
         { key: 'hardware2', label: 'Physical hardware instead of Wokwi?', type: 'toggle', conditionalOn: 'task2Attempted:checked' },
         { key: 'wokwiUrl2', label: 'Wokwi project URL', type: 'url', urlType: 'wokwi', conditionalOn: 'hardware2:unchecked',
           hint: 'Link to your Wokwi simulation for Task 2.' },
+        { key: 'linkTxt2', label: 'Link.txt contains only the raw URL.', type: 'checkbox', required: true,
+          conditionalOn: 'hardware2:unchecked' },
+        { key: 'hardwareDemo2', label: 'Demo.mp4 included in the folder (hardware demo).', type: 'checkbox', required: true,
+          conditionalOn: 'hardware2:checked' },
       ],
       checkboxes: [
-        { key: 'linkTxt2', label: 'Link.txt contains only the raw URL.', required: true },
         { key: 'codeTxt2', label: 'Code.txt is plain text (not .ino).', required: true },
         { key: 'rationale2', label: 'Design_rationale.docx (150–250 words) covers speed-ramp formula and heartbeat independence.', required: true },
       ],
@@ -406,8 +458,8 @@ const elecDept: DeptConfig = {
     },
   ],
   yearRule: (year, selectedTaskIds) => {
-    if (ELEC_TASK2_REQUIRED_FOR_2ND_YEAR && year === 2 && !selectedTaskIds.includes('elec-task2'))
-      return 'Task 2 (Simon Says with Heartbeat) is required for 2nd year students.';
+    if (isElecTask2Required(year) && !selectedTaskIds.includes('elec-task2'))
+      return 'Task 2 (Simon Says with Heartbeat) is required from 2nd year onward.';
     return null;
   },
 };
@@ -446,7 +498,7 @@ const webDept: DeptConfig = {
       tag: 'Optional',
       fields: [
         { key: 'task2Attempted', label: 'Task 2 attempted?', type: 'toggle' },
-        { key: 'repoUrl', label: 'GitHub repository URL', type: 'url', urlType: 'github',
+        { key: 'repoUrl', label: 'GitHub repository URL', type: 'url', urlType: 'github', required: true,
           conditionalOn: 'task2Attempted:checked', hint: 'Your Gym Slot Booking project repo.' },
         { key: 'liveUrl', label: 'Live / deployed URL', type: 'url', urlType: 'any-https',
           conditionalOn: 'task2Attempted:checked', hint: 'Optional: link to your deployed app.' },
@@ -581,7 +633,7 @@ const videoEditDept: DeptConfig = {
   ],
   globalCheckboxes: [
     LINK_SHARING_CHECKBOX('drivePublic'),
-    { key: 'fileName', label: '', required: true }, // label set dynamically via filenameHint
+    { key: 'fileName', label: 'File named in the required format.', required: true },
     { key: 'originalQuality', label: 'Exported at original quality, not a compressed WhatsApp/Instagram version.', required: true },
     { key: 'duration', label: 'Duration is 45–60 seconds, vertical 9:16, MP4 (recommended 1080×1920 or higher).', required: true },
     { key: 'byteFootage', label: 'The supplied BYTE event footage is the primary visual source; any external assets are royalty-free or official BYTE/Algo Trading Sprint assets.', required: true },
@@ -614,7 +666,7 @@ Q6: table format — Name & what it does; Why it fits (max 2 lines); Concrete of
   ],
   globalCheckboxes: [
     LINK_SHARING_CHECKBOX('docPublic'),
-    { key: 'fileName', label: '', required: true }, // dynamically: FullName_Branch_Outreach
+    { key: 'fileName', label: 'File named in the required format.', required: true },
     { key: 'taskOrder', label: 'Answers are in task order.', required: true },
     { key: 'noRealContact', label: 'I did not contact any real business or person using BYTE\'s name; this is a simulation and I submitted one response per question.', required: true },
     { key: 'limitsRespected', label: 'Word and character limits are respected.', required: true },
@@ -656,7 +708,7 @@ const gdDept: DeptConfig = {
       ],
       checkboxes: [
         LINK_SHARING_CHECKBOX('posterPublic'),
-        { key: 'posterFile', label: '', required: true }, // dynamic: Name_Branch_Poster.png
+        { key: 'posterFile', label: 'File named in the required format.', required: true },
         { key: 'qrReadable', label: 'QR code scans and text is readable on mobile.', required: true },
         { key: 'resolution', label: '1080×1350 px (4:5) high-resolution export.', required: true },
         { key: 'contentPack', label: 'Used the supplied content pack and did not fabricate events, stats, or claims; event photos are the supplied photos, not AI-generated.', required: true },
@@ -685,7 +737,7 @@ const gdDept: DeptConfig = {
       ],
       checkboxes: [
         LINK_SHARING_CHECKBOX('merchPublic'),
-        { key: 'merchFile', label: '', required: true }, // dynamic: Name_Branch_Merch.png
+        { key: 'merchFile', label: 'File named in the required format.', required: true },
         { key: 'original', label: 'Design is original and does not copy last year\'s merchandise.', required: true },
       ],
     },
@@ -768,14 +820,64 @@ export function isFieldActive(field: DeptField, formData: Record<string, any>): 
   return parentValue === parentVal;
 }
 
+/** Helper to determine if Electronics Task 2 is required for a given year */
+export function isElecTask2Required(year: number): boolean {
+  return ELEC_TASK2_REQUIRED_FOR_2ND_YEAR && year >= 2;
+}
+
+/** Helper to determine if CAD Task 2 is required for a given year */
+export function isCadTask2Required(year: number): boolean {
+  return CAD_TASK2_REQUIRED_FOR_2ND_YEAR && year >= 2;
+}
+
+/**
+ * Compute the effective tag for a task, taking year-based rules into account.
+ * Electronics Task 2 becomes 'Required' for year >= 2 when the flag is on.
+ * All other tasks return their static tag unchanged.
+ */
+export function getEffectiveTaskTag(task: TaskConfig, deptId: string, year: number): TaskConfig['tag'] {
+  if (deptId === 'electronics' && task.id === 'elec-task2' && isElecTask2Required(year)) {
+    return 'Required';
+  }
+  if (deptId === 'cad' && task.id === 'cad-task2' && isCadTask2Required(year)) {
+    return 'Required';
+  }
+  return task.tag;
+}
+
 /**
  * Check whether a task's toggle-gated checkboxes should be visible (the task is "attempted").
  * If the task has a field with key matching `<taskId-prefix>Attempted` and type toggle, return its value.
- * For required tasks (tag=Required), always return true.
+ * For tasks without such a toggle (like statically required tasks), always return true.
  */
 export function isTaskAttempted(task: TaskConfig, formData: Record<string, any>): boolean {
-  if (task.tag === 'Required') return true;
   const toggleField = task.fields.find(f => f.type === 'toggle' && f.key.includes('Attempted'));
   if (!toggleField) return true; // no toggle = always attempted
   return !!formData[toggleField.key];
+}
+
+/** Builds the standard filename hint: FirstName_Branch_Suffix */
+export function buildFilenameHint(studentName: string, branch: string, suffix: string): string {
+  const firstName = studentName.split(' ')[0] || 'Name';
+  const branchShort = branch || 'Branch';
+  return `${firstName}_${branchShort}_${suffix}`;
+}
+
+/** Formats dynamic checkbox labels (e.g. for filename requirements) across forms, review, and admin */
+export function formatCheckboxLabel(
+  deptId: string,
+  key: string,
+  label: string,
+  studentName?: string,
+  studentBranch?: string,
+): string {
+  const name = studentName || '';
+  const branch = studentBranch || '';
+  if (key === 'fileName') {
+    if (deptId === 'video-editing') return `File is named ${buildFilenameHint(name, branch, 'VideoEdit')}.mp4`;
+    if (deptId === 'outreach') return `File is named ${name.replace(/\s+/g, '') || 'FullName'}_${branch || 'Branch'}_Outreach`;
+  }
+  if (key === 'posterFile') return `File is named ${buildFilenameHint(name, branch, 'Poster')}.png`;
+  if (key === 'merchFile') return `File is named ${buildFilenameHint(name, branch, 'Merch')}.png`;
+  return label || key;
 }

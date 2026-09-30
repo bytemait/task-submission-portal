@@ -14,8 +14,10 @@ export function repoCoordinates(value: unknown): { owner: string; repo: string }
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.username || url.password || url.port || url.search || url.hash) return null;
     const pieces = url.pathname.split('/').filter(Boolean);
-    if (pieces.length !== 2 || !/^[\w-]{1,39}$/.test(pieces[0]) || !/^[\w.-]{1,100}$/.test(pieces[1]) || pieces[1] === '.' || pieces[1] === '..') return null;
-    return { owner: pieces[0], repo: pieces[1] };
+    if (pieces.length !== 2 || !/^[\w-]{1,39}$/.test(pieces[0])) return null;
+    const repo = pieces[1].replace(/\.git$/, '');
+    if (!/^[\w.-]{1,100}$/.test(repo) || repo === '.' || repo === '..') return null;
+    return { owner: pieces[0], repo };
   } catch { return null; }
 }
 
@@ -89,7 +91,7 @@ export function validateSubmission(data: Submission, final: boolean): string[] {
   const errors: string[] = [];
   if (!data || typeof data !== 'object' || !data.student || typeof data.student !== 'object' || !Array.isArray(data.selected) || !data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) return ['Invalid submission.'];
   const { name, enrollment, email, phone, dept, year, otherSocieties, socials } = data.student;
-  if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100 || typeof enrollment !== 'string' || !/^[A-Z0-9/\-]{4,30}$/.test(enrollment)) errors.push('Enter a valid name and enrollment number.');
+  if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100 || typeof enrollment !== 'string' || !/^\d{11}$/.test(enrollment)) errors.push('Enter a valid name and enrollment number.');
   if (typeof email !== 'string' || email.length > 254 || email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
   if (typeof phone !== 'string' || phone.length > 20 || phone && !/^[\d+()\s-]{7,20}$/.test(phone)) errors.push('Enter a valid phone number.');
   if (dept !== undefined && (typeof dept !== 'string' || dept.length > 100)) errors.push('Invalid department.');
@@ -177,6 +179,14 @@ export function validateDeptSubmission(data: Submission): string[] {
         const urlErr = validateFieldUrl(String(val), field.urlType);
         if (urlErr) errors.push(`${config.name}: ${urlErr}`);
       }
+      if (val && field.type === 'url-list' && Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === 'string' && item.trim()) {
+            const itemErr = validateFieldUrl(item.trim(), 'any-https');
+            if (itemErr) errors.push(`${config.name}: ${field.label} — "${item.trim()}" is not a valid URL.`);
+          }
+        }
+      }
       if (val && field.type === 'textarea' && field.maxLength && String(val).length > field.maxLength) {
         errors.push(`${config.name}: ${field.label} must be under ${field.maxLength} characters.`);
       }
@@ -190,7 +200,7 @@ export function validateDeptSubmission(data: Submission): string[] {
     // Validate global checkboxes
     for (const cb of config.globalCheckboxes) {
       if (cb.required && !answers[cb.key]) {
-        errors.push(`${config.name}: "${cb.label}" must be checked.`);
+        errors.push(`${config.name}: "${cb.label || cb.key}" must be checked.`);
       }
     }
 
@@ -237,6 +247,14 @@ export function validateDeptSubmission(data: Submission): string[] {
           const urlErr = validateFieldUrl(String(val), field.urlType);
           if (urlErr) errors.push(`${config.name} / ${task.name}: ${urlErr}`);
         }
+        if (val && field.type === 'url-list' && Array.isArray(val)) {
+          for (const item of val) {
+            if (typeof item === 'string' && item.trim()) {
+              const itemErr = validateFieldUrl(item.trim(), 'any-https');
+              if (itemErr) errors.push(`${config.name} / ${task.name}: ${field.label} — "${item.trim()}" is not a valid URL.`);
+            }
+          }
+        }
         // JSONL validation
         if (val && field.type === 'file' && field.accept === '.jsonl') {
           const jsonlErr = validateMangaJsonl(String(val));
@@ -252,8 +270,19 @@ export function validateDeptSubmission(data: Submission): string[] {
       // Validate task checkboxes
       for (const cb of task.checkboxes) {
         if (cb.required && !answers[cb.key]) {
-          errors.push(`${config.name} / ${task.name}: "${cb.label}" must be checked.`);
+          errors.push(`${config.name} / ${task.name}: "${cb.label || cb.key}" must be checked.`);
         }
+      }
+    }
+
+    // App Development: buildUrl vs noBuild validation
+    if (deptId === 'app-dev') {
+      const hasBuild = typeof answers.buildUrl === 'string' && answers.buildUrl.trim().length > 0;
+      const noBuild = !!answers.noBuild;
+      if (!hasBuild && !noBuild) {
+        errors.push('App Development: Provide a runnable build link or check "No hosted build is practical".');
+      } else if (hasBuild && noBuild) {
+        errors.push('App Development: Uncheck "No hosted build is practical" if providing a build link.');
       }
     }
   }

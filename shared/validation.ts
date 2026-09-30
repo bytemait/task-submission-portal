@@ -52,15 +52,15 @@ export function validatePhone(raw: string): string | null {
 }
 
 // ── Enrollment ──────────────────────────────────────────────────────────────
-// TODO: Replace with exact college format once confirmed.
-export const ENROLLMENT_RE = /^[A-Z0-9\-/]{6,20}$/;
+// Confirmed format: exactly 11 digits, numeric only.
+export const ENROLLMENT_RE = /^\d{11}$/;
 export function normalizeEnrollment(raw: string): string {
-  return raw.trim().toUpperCase();
+  return raw.trim();
 }
 export function validateEnrollment(raw: string): string | null {
   const v = normalizeEnrollment(raw);
   if (!v) return 'Enrollment number is required.';
-  if (!ENROLLMENT_RE.test(v)) return 'Enrollment number must be 6–20 alphanumeric characters.';
+  if (!ENROLLMENT_RE.test(v)) return 'Enter your 11-digit enrollment number.';
   return null;
 }
 
