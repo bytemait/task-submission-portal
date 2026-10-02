@@ -462,7 +462,7 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
 
       <FieldInput id="enrollment" label="Enrollment number" required value={data.enrollment} disabled={disabled}
         onChange={v => onChange('enrollment', v)} onBlur={() => onBlur('enrollment')}
-        error={errors.enrollment} hint="Your college enrollment/registration number"/>
+        error={errors.enrollment} hint="Your college enrollment/class roll no"/>
 
       <FieldInput id="email" label="Email address" type="email" required value={data.email}
         onChange={v => onChange('email', v)} onBlur={() => onBlur('email')}

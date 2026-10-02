@@ -5,6 +5,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tracks, type Submission } from '../shared/tracks.ts';
+import { validateEnrollment } from '../shared/validation.ts';
 import { validateSubmission, checkRepository, normalizeEnrollment, normalizeStudentProfile, studentToProfileData, isSubmissionProfileComplete, checkDriveAccessibility } from './validation.ts';
 import { buildSubmissionsCsv, buildSubmissionsJson } from './export.ts';
 import { validateProfile } from '../shared/validation.ts';
@@ -217,7 +218,7 @@ app.put('/api/profile', (req, res) => {
 app.post('/api/draft/recover', (req, res) => {
   if (limited(req, 'recover', 12)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
   const { name, enrollment } = req.body || {};
-  if (typeof name !== 'string' || typeof enrollment !== 'string' || name.trim().length < 2 || name.length > 100 || !/^[a-zA-Z0-9/-]{4,30}$/.test(enrollment.trim())) { res.status(400).json({ error: 'Enter your full name and a valid enrollment number.' }); return; }
+  if (typeof name !== 'string' || typeof enrollment !== 'string' || name.trim().length < 2 || name.length > 100 || validateEnrollment(enrollment)) { res.status(400).json({ error: 'Enter your full name and a valid enrollment number.' }); return; }
   const id = normalizeEnrollment(enrollment), row = getRow(id);
   if (row && row.name_key !== cleanName(name)) { res.status(409).json({ error: 'An entry exists for that enrollment number. Check your details or contact BYTE.' }); return; }
   if (row?.status === 'submitted') { res.status(409).json({ error: 'This enrollment number already has a final submission. Contact BYTE for changes.' }); return; }
