@@ -251,6 +251,10 @@ app.post('/api/draft/recover', (req, res) => {
   db.prepare('INSERT INTO submissions (enrollment, name_key, payload, status, updated_at, submitted_at, profile_completed_at) VALUES (?,?,?,?,?,NULL,NULL)').run(id, cleanName(name), JSON.stringify(initial), 'draft', now);
   res.json({ found: false, submission: initial });
 });
+app.post('/api/draft/logout', (req, res) => {
+  clear(req, res, 'draft');
+  res.json({ ok: true });
+});
 app.get('/api/draft', (req, res) => {
   const s = session(req, 'draft'); if (!s) { res.status(401).json({ error: 'No active draft.' }); return; }
   const row = getRow(s.enrollment!); if (!row || row.status !== 'draft') { res.status(404).json({ error: 'Draft unavailable.' }); return; }

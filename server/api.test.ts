@@ -38,6 +38,13 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
       noRealContact: true, limitsRespected: true, llmDisclosure: true, q6Real: true,
     } };
     assert.equal((await call('/draft', 'PUT', draft, cookie)).response.status, 200);
+    // Test draft logout
+    const logoutRes = await call('/draft/logout', 'POST', {}, cookie);
+    assert.equal(logoutRes.response.status, 200);
+    const clearedDraftCookie = logoutRes.response.headers.getSetCookie().find(c => c.startsWith('draft=;'));
+    assert.ok(clearedDraftCookie, 'draft cookie cleared');
+    assert.equal((await call('/draft', 'GET', undefined, clearedDraftCookie)).response.status, 401);
+
     const recovered = await call('/draft/recover', 'POST', { name: 'test   student', enrollment: '12345678901' });
     assert.equal(recovered.data.found, true);
     assert.equal(recovered.data.submission.answers['outreach'].work, draft.answers['outreach'].work);

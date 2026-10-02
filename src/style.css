@@ -11,6 +11,7 @@
 
 /* ── Link button ───────────────────────────────────────────────────────── */
 .link-btn{background:none;border:0;color:#baf263;font-weight:700;font-size:12px;text-decoration:underline;cursor:pointer;padding:0}
+.switch-user-row{grid-column:1/-1;margin:-8px 0 8px;text-align:right}
 
 /* ── Folder tree ──────────────────────────────────────────────────────── */
 .folder-tree{background:#0f221a;border:1px solid #2c4832;border-radius:5px;padding:18px 20px;margin-bottom:24px;font-size:12px}.folder-tree pre{margin:10px 0 0;color:#a5bfa3;font-family:'DM Mono',monospace;line-height:1.7;white-space:pre-wrap;overflow-x:auto}.folder-tree-name{color:#d5e2d5;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;margin:0}.folder-tree-name svg{color:#baf263}

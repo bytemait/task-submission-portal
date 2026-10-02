@@ -436,10 +436,11 @@ function SocietyList({ items, onChange, error }: { items: string[]; onChange: (v
 }
 
 // ── Step 1: Applicant Details ───────────────────────────────────────────────
-function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disabled }: {
+function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disabled, onSwitchUser }: {
   data: Student; onChange: (key: keyof Student, value: any) => void;
   onBatchChange: (updates: Partial<Student>) => void;
   errors: ProfileErrors; onBlur: (key: string) => void; disabled?: boolean;
+  onSwitchUser?: () => void;
 }) {
   const yearNum = data.year ? parseInt(data.year, 10) : 0;
   const validSemesters = yearNum >= 1 && yearNum <= 4 ? semestersForYear(yearNum) : null;
@@ -471,6 +472,10 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
       <FieldInput id="enrollment" label="Enrollment number" required value={data.enrollment} disabled={disabled}
         onChange={v => onChange('enrollment', v)} onBlur={() => onBlur('enrollment')}
         error={errors.enrollment} hint={disabled ? 'Locked to your active draft session.' : 'Your college enrollment/class roll no'}/>
+
+      {disabled && onSwitchUser && <div className="switch-user-row">
+        <button type="button" className="link-btn" onClick={onSwitchUser}>Not you? Start fresh</button>
+      </div>}
 
       <FieldInput id="email" label="Email address" type="email" required value={data.email}
         onChange={v => onChange('email', v)} onBlur={() => onBlur('email')}
@@ -743,6 +748,16 @@ function Wizard() {
     } catch (e) { setError((e as Error).message); return false; }
     finally { setRecovering(false); }
   }
+  async function switchUser() {
+    try { await post('/draft/logout'); } catch {}
+    if (data.student.enrollment) clearDraftLocal(data.student.enrollment);
+    const fresh = emptySubmission();
+    setData(fresh); latest.current = fresh;
+    setActive(false); setFound(false); setStep(0);
+    setProfileComplete(false); setProfileErrors({});
+    setSaveState('Enter your details to begin');
+    version.current = 0; saved.current = 0;
+  }
 
   async function saveProfile(): Promise<boolean> {
     // Validate all fields
@@ -962,7 +977,7 @@ function Wizard() {
 
   {step === 0 && <>
     {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> We found your draft and picked up where you left off.</div>}
-    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active}/>
+    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active} onSwitchUser={switchUser}/>
     <div className="notice"><ShieldCheck size={19}/><span>Already started? Enter the same name and enrollment number and we'll recover your draft. Anyone with these details may access it; avoid entering sensitive information.</span></div>
   </>}
 
