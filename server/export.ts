@@ -1,5 +1,8 @@
-import { tracks, type Submission } from '../shared/tracks.ts';
-import { deptConfigs } from '../shared/submissionConfig.ts';
+import type { Submission } from '../shared/tracks.ts';
+import {
+  deptConfigs, isFieldActive, isTaskAttempted,
+  type DeptField, type TaskConfig,
+} from '../shared/submissionConfig.ts';
 
 /**
  * Escapes a cell according to RFC 4180 and protects against CSV formula injection.
@@ -24,7 +27,7 @@ export function escapeCsvCell(raw: unknown): string {
 
 /**
  * Generates an RFC 4180 compliant CSV string from an array of submissions,
- * dynamically mapping tracks and fields based on shared/tracks.ts.
+ * dynamically mapping tracks, department fields, checkboxes, toggles, and task selections.
  */
 export function buildSubmissionsCsv(submissions: Submission[]): string {
   // Base headers for applicant identification.
@@ -33,38 +36,76 @@ export function buildSubmissionsCsv(submissions: Submission[]): string {
     'Instagram', 'Twitter/X', 'Discord', 'Status', 'Submitted At', 'Last Updated', 'Selected Tracks',
     'Academic Branch', 'Semester', 'Societies',
   ];
-  const trackColumns: { trackId: string; fieldKey: string; header: string }[] = [];
-  for (const track of tracks) {
-    for (const field of track.fields) {
-      const header = `${track.name} - ${field.label}`;
-      trackColumns.push({ trackId: track.id, fieldKey: field.key, header });
-      headers.push(header);
-    }
-  }
-  const departmentColumns: { deptId: string; fieldKey: string; header: string }[] = [];
+
+
+
+  // Department columns — covers ALL data: globalFields, globalCheckboxes,
+  // task fields (including toggles), task checkboxes, and deptSelected.
+  type DeptColumnDef = {
+    deptId: string;
+    fieldKey: string;
+    header: string;
+    task?: TaskConfig;
+    field?: DeptField;
+    isAttemptToggle?: boolean;
+  };
+  const departmentColumns: DeptColumnDef[] = [];
 
   for (const dept of deptConfigs) {
-    for (const field of dept.globalFields) {
-      const header = `${dept.name} - ${field.label}`;
-      departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+    // deptSelected — which tasks the student picked (for taskPicker depts like ML)
+    if (dept.taskPicker) {
+      const header = `${dept.name} - Selected Tasks`;
+      departmentColumns.push({ deptId: dept.id, fieldKey: '__selectedTasks__', header });
       headers.push(header);
     }
+
+    // Global fields (url, text, textarea, select, multi-select, file, url-list, checkbox, toggle)
+    for (const field of dept.globalFields) {
+      const header = `${dept.name} - ${field.label}`;
+      departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header, field });
+      headers.push(header);
+    }
+
+    // Global checkboxes (sharing confirmations, attestations, etc.)
+    for (const cb of dept.globalCheckboxes) {
+      const label = cb.label || cb.key;
+      const header = `${dept.name} - ✓ ${label.substring(0, 80)}`;
+      departmentColumns.push({ deptId: dept.id, fieldKey: cb.key, header });
+      headers.push(header);
+    }
+
+    // Task-level fields and checkboxes
     for (const task of dept.tasks) {
+      // ALL task fields — including toggles (task2Attempted, hardware, etc.)
       for (const field of task.fields) {
-        if (field.type === 'toggle') continue;
         const header = `${dept.name} [${task.name}] - ${field.label}`;
-        departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+        const isAttemptToggle = field.type === 'toggle' && field.key.includes('Attempted');
+        departmentColumns.push({
+          deptId: dept.id,
+          fieldKey: field.key,
+          header,
+          task,
+          field,
+          isAttemptToggle,
+        });
+        headers.push(header);
+      }
+
+      // Task checkboxes (attestations within a task)
+      for (const cb of task.checkboxes) {
+        const label = cb.label || cb.key;
+        const header = `${dept.name} [${task.name}] - ✓ ${label.substring(0, 80)}`;
+        departmentColumns.push({ deptId: dept.id, fieldKey: cb.key, header, task });
         headers.push(header);
       }
     }
   }
 
-
   const rows: string[] = [headers.map(escapeCsvCell).join(',')];
 
   for (const s of submissions) {
     const selectedTrackNames = s.selected
-      .map(id => tracks.find(t => t.id === id)?.name || id)
+      .map(id => deptConfigs.find(d => d.id === id)?.name || id)
       .join('; ');
 
     const row = [
@@ -87,13 +128,80 @@ export function buildSubmissionsCsv(submissions: Submission[]): string {
       escapeCsvCell((s.student.societies || []).join('; ')),
     ];
 
-    for (const col of trackColumns) {
-      row.push(escapeCsvCell(s.answers?.[col.trackId]?.[col.fieldKey] || ''));
-    }
+
+
+    const deptAnswers = s.deptAnswers || {};
 
     for (const col of departmentColumns) {
-      const value = s.deptAnswers?.[col.deptId]?.[col.fieldKey] ?? s.answers?.[col.deptId]?.[col.fieldKey] ?? '';
-      row.push(escapeCsvCell(Array.isArray(value) ? value.join('; ') : value));
+      // 1. If the department was not selected by the applicant, output empty cell
+      if (!s.selected.includes(col.deptId)) {
+        row.push(escapeCsvCell(''));
+        continue;
+      }
+
+      // 2. Special handling for deptSelected (task picker selections)
+      if (col.fieldKey === '__selectedTasks__') {
+        const selected = s.deptSelected?.[col.deptId] || [];
+        row.push(escapeCsvCell(selected.join('; ')));
+        continue;
+      }
+
+      const answers = deptAnswers[col.deptId] ?? s.answers?.[col.deptId] ?? {};
+      const deptConfig = deptConfigs.find(d => d.id === col.deptId);
+
+      // 3. Task-level gating:
+      if (col.task) {
+        // 3a. For task-picker departments (like ML), check if this task was chosen
+        if (deptConfig?.taskPicker) {
+          const chosenTasks = s.deptSelected?.[col.deptId] || [];
+          if (!chosenTasks.includes(col.task.id)) {
+            row.push(escapeCsvCell(''));
+            continue;
+          }
+        }
+
+        // 3b. For tasks with an attempted-toggle pattern (Electronics Task 2/3, CAD Task 2, Web Dev Task 2, Graphic Design Task 2):
+        // If the task is NOT attempted:
+        // - the attempt-toggle column itself exports its value (e.g. "No")
+        // - all other fields and checkboxes in this task are blanked!
+        const attempted = isTaskAttempted(col.task, answers);
+        if (!attempted && !col.isAttemptToggle) {
+          row.push(escapeCsvCell(''));
+          continue;
+        }
+      }
+
+      // 4. Conditional field gating (isFieldActive):
+      // Covers Falsification's experiment toggle (falsificationRepo/commits),
+      // App Dev's advanced missions / auth / privacy (stageReached:2+, stageReached:3),
+      // Electronics hardware toggles, Agentic memory, Canva links, etc.
+      if (col.field && !isFieldActive(col.field, answers)) {
+        row.push(escapeCsvCell(''));
+        continue;
+      }
+
+      // 5. App Dev buildUrl vs noBuild mutual exclusion:
+      if (col.deptId === 'app-dev') {
+        if (col.fieldKey === 'buildUrl' && answers.noBuild) {
+          row.push(escapeCsvCell(''));
+          continue;
+        }
+        if (col.fieldKey === 'noBuild' && typeof answers.buildUrl === 'string' && answers.buildUrl.trim()) {
+          row.push(escapeCsvCell('No'));
+          continue;
+        }
+      }
+
+      const value = answers[col.fieldKey] ?? '';
+
+      // Format booleans as Yes/No for readability (checkboxes, toggles)
+      if (typeof value === 'boolean') {
+        row.push(escapeCsvCell(value ? 'Yes' : 'No'));
+      } else if (Array.isArray(value)) {
+        row.push(escapeCsvCell(value.join('; ')));
+      } else {
+        row.push(escapeCsvCell(value));
+      }
     }
 
     rows.push(row.join(','));

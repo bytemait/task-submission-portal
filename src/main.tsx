@@ -11,8 +11,9 @@ import {
   type ProfileErrors,
 } from '../shared/validation.ts';
 import {
-  deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted,
+  deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted, getEffectiveTaskTag,
   validateFieldUrl, validateMangaJsonl, countWords, validateWordLimit,
+  formatCheckboxLabel, buildFilenameHint,
   type DeptConfig, type TaskConfig, type DeptField,
 } from '../shared/submissionConfig.ts';
 import './style.css';
@@ -188,12 +189,7 @@ function CollapsibleHelper({ title, content }: { title: string; content: string 
   </div>;
 }
 
-// ── Filename hint ───────────────────────────────────────────────────────────
-function buildFilenameHint(studentName: string, branch: string, suffix: string): string {
-  const firstName = studentName.split(' ')[0] || 'Name';
-  const branchShort = branch || 'Branch';
-  return `${firstName}_${branchShort}_${suffix}`;
-}
+
 function TaskPicker({ config, selected, onChange, year, error }: {
   config: DeptConfig; selected: string[]; onChange: (ids: string[]) => void; year: number; error?: string;
 }) {
@@ -298,21 +294,8 @@ function DeptForm({ config, answers, selectedTasks, onAnswer, onSelectTasks, yea
 
   const folderName = config.folderNameHint?.replace('<YourName>', studentName.split(' ')[0] || 'YourName');
 
-  // Dynamic filename labels for checkboxes with empty labels
-  const filenameMap: Record<string, string> = {
-    // Video Editing
-    'fileName': config.id === 'video-editing'
-      ? `File is named ${buildFilenameHint(studentName, studentBranch, 'VideoEdit')}.mp4`
-      : config.id === 'outreach'
-      ? `File is named ${studentName.replace(/\s+/g, '')}_${studentBranch || 'Branch'}_Outreach`
-      : '',
-    // Graphic Design
-    'posterFile': `File is named ${buildFilenameHint(studentName, studentBranch, 'Poster')}.png`,
-    'merchFile': `File is named ${buildFilenameHint(studentName, studentBranch, 'Merch')}.png`,
-  };
-
   const getCheckboxLabel = (cb: { key: string; label: string }) =>
-    cb.label || filenameMap[cb.key] || cb.key;
+    formatCheckboxLabel(config.id, cb.key, cb.label, studentName, studentBranch);
 
   return <>
     {/* Helper hint */}
@@ -344,17 +327,42 @@ function DeptForm({ config, answers, selectedTasks, onAnswer, onSelectTasks, yea
       // For task-picker depts, only show selected tasks' fields
       if (config.taskPicker && !selectedTasks.includes(task.id)) return null;
 
+      const effectiveTag = getEffectiveTaskTag(task, config.id, year);
       const attempted = isTaskAttempted(task, answers);
       const showContent = config.taskPicker || attempted;
 
-      return <div key={task.id} className={'dept-task ' + (task.tag === 'Bonus' || task.tag === 'Optional' ? 'dept-task-bonus' : '')}>
+      // If this task is effectively Required (year-driven), auto-set any "Attempted" toggle to true
+      const attemptedToggle = task.fields.find(f => f.type === 'toggle' && f.key.includes('Attempted'));
+      const isYearRequired = effectiveTag === 'Required' && task.tag !== 'Required'; // year-driven override
+      if (isYearRequired && attemptedToggle && !answers[attemptedToggle.key]) {
+        // Force the toggle on — fires once when the user reaches this form with year >= 2
+        setTimeout(() => onAnswer(attemptedToggle.key, true), 0);
+      }
+
+      return <div key={task.id} className={'dept-task ' + (effectiveTag === 'Bonus' || effectiveTag === 'Optional' ? 'dept-task-bonus' : '')}>
         <div className="dept-task-heading">
-          <span className={'task-tag tag-' + task.tag.toLowerCase()}>{task.tag}</span>
+          <span className={'task-tag tag-' + effectiveTag.toLowerCase()}>{effectiveTag}</span>
           <h3>{task.name}</h3>
         </div>
 
-        {/* Toggle fields (like "Task 2 attempted?") always shown */}
-        {task.fields.filter(f => f.type === 'toggle').map(f => renderField(f, `${config.id}-${task.id}`))}
+        {/* Toggle fields (like "Task 2 attempted?") always shown — unless year-required, then lock it */}
+        {task.fields.filter(f => f.type === 'toggle').map(f => {
+          const isAttemptedToggle = f.key.includes('Attempted');
+          if (isYearRequired && isAttemptedToggle) {
+            // Locked: year-required tasks can't be toggled off
+            return <div key={`${config.id}-${task.id}-${f.key}`} className="form-field full">
+              <label>{f.label}</label>
+              <div className="toggle-group">
+                <button type="button" className="toggle-btn active" disabled>Yes</button>
+                <button type="button" className="toggle-btn" disabled onClick={() => {}}>No</button>
+              </div>
+              <p className="hint" style={{marginTop:4, color: '#b8d67a'}}>
+                ⓘ This task is required for year {year} students and cannot be skipped.
+              </p>
+            </div>;
+          }
+          return renderField(f, `${config.id}-${task.id}`);
+        })}
 
         {showContent && <>
           {/* Task helper text */}
@@ -373,7 +381,7 @@ function DeptForm({ config, answers, selectedTasks, onAnswer, onSelectTasks, yea
           </div>}
         </>}
 
-        {!showContent && task.tag !== 'Required' && <p className="hint" style={{marginTop:8}}>Toggle "Yes" above to fill in this task. {task.tag === 'Bonus' ? 'This is a bonus task.' : ''}</p>}
+        {!showContent && effectiveTag !== 'Required' && <p className="hint" style={{marginTop:8}}>Toggle "Yes" above to fill in this task. {effectiveTag === 'Bonus' ? 'This is a bonus task.' : ''}</p>}
       </div>;
     })}
   </>;
@@ -394,7 +402,7 @@ function FieldInput({ id, label, value, onChange, type = 'text', hint, required,
     <input id={id} type={type} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} disabled={disabled}
       autoComplete={autoComplete} inputMode={inputMode as any}
       aria-describedby={describedBy} aria-invalid={!!error}
-      placeholder={type === 'url' ? 'https://...' : label === 'Full name' ? 'Your name, as on college records' : label === 'Enrollment number' ? 'e.g. 1234567890' : ''}/>}
+      placeholder={type === 'url' ? 'https://...' : label === 'Full name' ? 'Your name, as on college records' : label === 'Enrollment number' ? 'e.g. 12345678901' : ''}/>}
     {hint && <p className="hint" id={hintId}>{hint}</p>}
     {error && <p className="field-error" id={errorId} role="alert">{error}</p>}
   </div>;
@@ -458,11 +466,11 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
     <div className="form-grid">
       <FieldInput id="name" label="Full name" required value={data.name} disabled={disabled}
         onChange={v => onChange('name', v)} onBlur={() => onBlur('name')}
-        error={errors.name} autoComplete="name"/>
+        error={errors.name} autoComplete="name" hint={disabled ? 'Locked to your active draft session.' : undefined}/>
 
       <FieldInput id="enrollment" label="Enrollment number" required value={data.enrollment} disabled={disabled}
         onChange={v => onChange('enrollment', v)} onBlur={() => onBlur('enrollment')}
-        error={errors.enrollment} hint="Your college enrollment/class roll no"/>
+        error={errors.enrollment} hint={disabled ? 'Locked to your active draft session.' : 'Your college enrollment/class roll no'}/>
 
       <FieldInput id="email" label="Email address" type="email" required value={data.email}
         onChange={v => onChange('email', v)} onBlur={() => onBlur('email')}
@@ -491,7 +499,6 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
           <option value="">Select year</option>
           {[1, 2, 3, 4].map(y => <option key={y} value={String(y)}>{y === 1 ? '1st' : y === 2 ? '2nd' : y === 3 ? '3rd' : '4th'} year</option>)}
         </select>
-        {/* TODO: For 4th year, apply the most permissive task rule. */}
         {errors.year && <p className="field-error" role="alert">{errors.year}</p>}
       </div>
 
@@ -794,11 +801,11 @@ function Wizard() {
         const config = getDeptConfig(deptId);
         if (!config || config.comingSoon) continue;
         const answers = (data.deptAnswers || {})[deptId] || {};
+        const yearNum = parseInt(data.student.year, 10) || 0;
         // For taskPicker depts use explicit selections; for others derive from attempted tasks
         const selectedTasks = config.taskPicker
           ? ((data.deptSelected || {})[deptId] || [])
           : config.tasks.filter(t => isTaskAttempted(t, answers)).map(t => t.id);
-        const yearNum = parseInt(data.student.year, 10) || 0;
 
         // Global required fields
         for (const field of config.globalFields) {
@@ -821,10 +828,25 @@ function Wizard() {
             const urlErr = validateFieldUrl(String(val), field.urlType);
             if (urlErr) { setError(`${config.name}: ${urlErr}`); return; }
           }
+          if (val && field.type === 'url-list' && Array.isArray(val)) {
+            for (const item of val) {
+              if (typeof item === 'string' && item.trim()) {
+                const urlErr = validateFieldUrl(item.trim(), 'any-https');
+                if (urlErr) { setError(`${config.name}: ${field.label} — "${item.trim()}" is not a valid URL.`); return; }
+              }
+            }
+          }
+          if (val && field.wordLimit && typeof val === 'string') {
+            const wErr = validateWordLimit(val, field.wordLimit);
+            if (wErr) { setError(`${config.name}: ${field.label} — ${wErr}`); return; }
+          }
         }
         // Global checkboxes
         for (const cb of config.globalCheckboxes) {
-          if (cb.required && !answers[cb.key]) { setError(`${config.name}: Please check “${cb.label}”`); return; }
+          if (cb.required && !answers[cb.key]) {
+            const label = formatCheckboxLabel(config.id, cb.key, cb.label, data.student.name, data.student.academicBranch);
+            setError(`${config.name}: Please check “${label}”`); return;
+          }
         }
         // Task picker count
         if (config.taskPicker && config.taskPickCount && selectedTasks.length !== config.taskPickCount) {
@@ -857,9 +879,43 @@ function Wizard() {
                 setError(`${config.name} / ${task.name}: ${field.label} is required.`); return;
               }
             }
+            if (val && field.urlType) {
+              const urlErr = validateFieldUrl(String(val), field.urlType);
+              if (urlErr) { setError(`${config.name} / ${task.name}: ${urlErr}`); return; }
+            }
+            if (val && field.type === 'url-list' && Array.isArray(val)) {
+              for (const item of val) {
+                if (typeof item === 'string' && item.trim()) {
+                  const urlErr = validateFieldUrl(item.trim(), 'any-https');
+                  if (urlErr) { setError(`${config.name} / ${task.name}: ${field.label} — "${item.trim()}" is not a valid URL.`); return; }
+                }
+              }
+            }
+            if (val && field.type === 'file' && field.accept === '.jsonl') {
+              const jsonlErr = validateMangaJsonl(String(val));
+              if (jsonlErr) { setError(`${config.name} / ${task.name}: ${jsonlErr}`); return; }
+            }
+            if (val && field.wordLimit && typeof val === 'string') {
+              const wErr = validateWordLimit(val, field.wordLimit);
+              if (wErr) { setError(`${config.name} / ${task.name}: ${field.label} — ${wErr}`); return; }
+            }
           }
           for (const cb of task.checkboxes) {
-            if (cb.required && !answers[cb.key]) { setError(`${config.name} / ${task.name}: Please check “${cb.label}”`); return; }
+            if (cb.required && !answers[cb.key]) {
+              const label = formatCheckboxLabel(config.id, cb.key, cb.label, data.student.name, data.student.academicBranch);
+              setError(`${config.name} / ${task.name}: Please check “${label}”`); return;
+            }
+          }
+        }
+        // App Development: buildUrl vs noBuild validation
+        if (config.id === 'app-dev') {
+          const hasBuild = typeof answers.buildUrl === 'string' && answers.buildUrl.trim().length > 0;
+          const noBuild = !!answers.noBuild;
+          if (!hasBuild && !noBuild) {
+            setError('App Development: Provide a runnable build link or check "No hosted build is practical".'); return;
+          }
+          if (hasBuild && noBuild) {
+            setError('App Development: Uncheck "No hosted build is practical" if providing a build link.'); return;
           }
         }
       }
@@ -906,7 +962,7 @@ function Wizard() {
 
   {step === 0 && <>
     {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> We found your draft and picked up where you left off.</div>}
-    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active && step === 0 && false /* Name/enrollment lock handled server-side */}/>
+    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active}/>
     <div className="notice"><ShieldCheck size={19}/><span>Already started? Enter the same name and enrollment number and we'll recover your draft. Anyone with these details may access it; avoid entering sensitive information.</span></div>
   </>}
 
@@ -956,7 +1012,7 @@ function Wizard() {
         </div>;
       });
     })()}
-    {data.selected.length > 0 && <div className="notice" style={{marginTop:24}}><Pencil size={19}/><span>You can edit your submission until the window closes. Re-submitting updates the same record.</span></div>}
+    {data.selected.length > 0 && <div className="notice" style={{marginTop:24}}><Pencil size={19}/><span>You can save and edit your draft until you make your final submission.</span></div>}
   </>}
 
   {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">Take a moment to review everything. Once submitted, your application can't be edited.</p>
@@ -982,19 +1038,39 @@ function Wizard() {
           {dept.globalFields.map(f => {
             const val = answers[f.key];
             if (!val) return null;
-            return <p key={f.key}><span>{f.label}</span>{f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)}</a> : String(val)}</p>;
+            return <p key={f.key}><span>{f.label}</span>{
+              f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)}</a> :
+              f.type === 'url-list' && Array.isArray(val) ? (
+                <span>{val.filter(v => typeof v === 'string' && v.trim()).map((u, i) => (
+                  <span key={i}>{i > 0 && '; '}<a href={u} target="_blank" rel="noreferrer">{u}</a></span>
+                ))}</span>
+              ) :
+              String(val)
+            }</p>;
           })}
           {/* Global checkboxes */}
-          {dept.globalCheckboxes.filter(cb => answers[cb.key]).map(cb => <p key={cb.key} className="review-checkbox">✅ {cb.label}</p>)}
+          {dept.globalCheckboxes.filter(cb => answers[cb.key]).map(cb => <p key={cb.key} className="review-checkbox">✅ {formatCheckboxLabel(dept.id, cb.key, cb.label, data.student.name, data.student.academicBranch)}</p>)}
           {/* Tasks */}
-          {dept.tasks.filter(t => !dept.taskPicker || selectedTasks.includes(t.id)).filter(t => isTaskAttempted(t, answers)).map(task => <div key={task.id} className="review-task-section">
-            <p className="review-task-name">{task.name} <span className={'task-tag tag-' + task.tag.toLowerCase()}>{task.tag}</span></p>
-            {task.fields.filter(f => f.type !== 'toggle' && answers[f.key]).map(f => {
-              const val = answers[f.key];
-              return <p key={f.key}><span>{f.label}</span>{f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)}</a> : f.type === 'file' ? `${String(val).trim().split('\n').length} lines` : String(val)}</p>;
-            })}
-            {task.checkboxes.filter(cb => answers[cb.key]).map(cb => <p key={cb.key} className="review-checkbox">✅ {cb.label}</p>)}
-          </div>)}
+          {dept.tasks.filter(t => !dept.taskPicker || selectedTasks.includes(t.id)).filter(t => isTaskAttempted(t, answers)).map(task => {
+            const effTag = getEffectiveTaskTag(task, dept.id, parseInt(data.student.year, 10) || 0);
+            return <div key={task.id} className="review-task-section">
+              <p className="review-task-name">{task.name} <span className={'task-tag tag-' + effTag.toLowerCase()}>{effTag}</span></p>
+              {task.fields.filter(f => f.type !== 'toggle' && answers[f.key]).map(f => {
+                const val = answers[f.key];
+                return <p key={f.key}><span>{f.label}</span>{
+                  f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)}</a> :
+                  f.type === 'url-list' && Array.isArray(val) ? (
+                    <span>{val.filter(v => typeof v === 'string' && v.trim()).map((u, i) => (
+                      <span key={i}>{i > 0 && '; '}<a href={u} target="_blank" rel="noreferrer">{u}</a></span>
+                    ))}</span>
+                  ) :
+                  f.type === 'file' ? `${String(val).trim().split('\n').length} lines` :
+                  String(val)
+                }</p>;
+              })}
+              {task.checkboxes.filter(cb => answers[cb.key]).map(cb => <p key={cb.key} className="review-checkbox">✅ {formatCheckboxLabel(dept.id, cb.key, cb.label, data.student.name, data.student.academicBranch)}</p>)}
+            </div>;
+          })}
         </div>;
       })}
     </div>
@@ -1021,7 +1097,7 @@ function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
   const [exporting, setExporting] = useState(false);
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
-  const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name, s.student.enrollment, s.student.email].some(v => v.toLowerCase().includes(query.toLowerCase())));
+  const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name || '', s.student.enrollment || '', s.student.email || ''].some(v => v.toLowerCase().includes(query.toLowerCase())));
 
   async function exportCSV() {
     setExporting(true);
@@ -1055,7 +1131,7 @@ function Admin() {
     finally { setExporting(false); }
   }
 
-  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div><div className="stats"><div><small>TOTAL APPLICATIONS</small><strong>{items.length}</strong></div><div><small>SUBMITTED</small><strong>{items.filter(i => i.status === 'submitted').length}</strong></div><div><small>IN PROGRESS</small><strong>{items.filter(i => i.status === 'draft').length}</strong></div><div><small>TRACKS</small><strong>{tracks.length}</strong></div></div><div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by track</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All tracks</option>{tracks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => setSelected(s)}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
+  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div><div className="stats"><div><small>TOTAL APPLICATIONS</small><strong>{items.length}</strong></div><div><small>SUBMITTED</small><strong>{items.filter(i => i.status === 'submitted').length}</strong></div><div><small>IN PROGRESS</small><strong>{items.filter(i => i.status === 'draft').length}</strong></div><div><small>DEPARTMENTS</small><strong>{deptConfigs.length}</strong></div></div><div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => setSelected(s)}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
   {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span><div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div><h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {
     const config = getDeptConfig(deptId);
     const deptAns = (selected.deptAnswers || {})[deptId] || {};
@@ -1067,17 +1143,34 @@ function Admin() {
         {config.globalFields.map(f => {
           const val = deptAns[f.key] !== undefined ? deptAns[f.key] : legacyAns[f.key];
           if (!val) return null;
-          return <div key={f.key}><small>{f.label}</small><p>{f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)} <ArrowUpRight size={13}/></a> : String(val)}</p></div>;
+          return <div key={f.key}><small>{f.label}</small><p>{
+            f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)} <ArrowUpRight size={13}/></a> :
+            f.type === 'url-list' && Array.isArray(val) ? val.filter(v => typeof v === 'string' && v.trim()).map((u, i) => (
+              <span key={i} style={{display:'block'}}><a href={u} target="_blank" rel="noreferrer">{u} <ArrowUpRight size={13}/></a></span>
+            )) :
+            String(val)
+          }</p></div>;
         })}
-        {config.globalCheckboxes.filter(cb => deptAns[cb.key]).map(cb => <p key={cb.key} style={{fontSize:12,color:'#baf263',margin:'4px 0'}}>✓ {cb.label}</p>)}
-        {config.tasks.filter(t => !config.taskPicker || selectedTasks.includes(t.id)).filter(t => isTaskAttempted(t, deptAns)).map(task => <div key={task.id} style={{marginTop:14,paddingLeft:12,borderLeft:'2px solid #3b543f'}}>
-          <p style={{fontWeight:600,fontSize:13,margin:'6px 0',color:'#dce8dc'}}>{task.name} <span className={'task-tag tag-' + task.tag.toLowerCase()}>{task.tag}</span></p>
-          {task.fields.filter(f => f.type !== 'toggle' && deptAns[f.key]).map(f => {
-            const val = deptAns[f.key];
-            return <div key={f.key}><small>{f.label}</small><p>{f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)} <ArrowUpRight size={13}/></a> : f.type === 'file' ? `${String(val).trim().split('\n').length} lines` : String(val)}</p></div>;
-          })}
-          {task.checkboxes.filter(cb => deptAns[cb.key]).map(cb => <p key={cb.key} style={{fontSize:12,color:'#baf263',margin:'4px 0'}}>✓ {cb.label}</p>)}
-        </div>)}
+        {config.globalCheckboxes.filter(cb => deptAns[cb.key]).map(cb => <p key={cb.key} style={{fontSize:12,color:'#baf263',margin:'4px 0'}}>✓ {formatCheckboxLabel(config.id, cb.key, cb.label, selected.student.name, selected.student.academicBranch)}</p>)}
+        {config.tasks.filter(t => !config.taskPicker || selectedTasks.includes(t.id)).filter(t => isTaskAttempted(t, deptAns)).map(task => {
+          const studentYear = parseInt(selected.student.year, 10) || 0;
+          const effTag = getEffectiveTaskTag(task, config.id, studentYear);
+          return <div key={task.id} style={{marginTop:14,paddingLeft:12,borderLeft:'2px solid #3b543f'}}>
+            <p style={{fontWeight:600,fontSize:13,margin:'6px 0',color:'#dce8dc'}}>{task.name} <span className={'task-tag tag-' + effTag.toLowerCase()}>{effTag}</span></p>
+            {task.fields.filter(f => f.type !== 'toggle' && deptAns[f.key]).map(f => {
+              const val = deptAns[f.key];
+              return <div key={f.key}><small>{f.label}</small><p>{
+                f.type === 'url' ? <a href={String(val)} target="_blank" rel="noreferrer">{String(val)} <ArrowUpRight size={13}/></a> :
+                f.type === 'url-list' && Array.isArray(val) ? val.filter(v => typeof v === 'string' && v.trim()).map((u, i) => (
+                  <span key={i} style={{display:'block'}}><a href={u} target="_blank" rel="noreferrer">{u} <ArrowUpRight size={13}/></a></span>
+                )) :
+                f.type === 'file' ? `${String(val).trim().split('\n').length} lines` :
+                String(val)
+              }</p></div>;
+            })}
+            {task.checkboxes.filter(cb => deptAns[cb.key]).map(cb => <p key={cb.key} style={{fontSize:12,color:'#baf263',margin:'4px 0'}}>✓ {formatCheckboxLabel(config.id, cb.key, cb.label, selected.student.name, selected.student.academicBranch)}</p>)}
+          </div>;
+        })}
       </div>;
     }
     const track = tracks.find(t => t.id === deptId);

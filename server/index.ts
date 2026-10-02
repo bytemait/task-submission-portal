@@ -5,11 +5,10 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tracks, type Submission } from '../shared/tracks.ts';
-import { validateEnrollment } from '../shared/validation.ts';
+import { validateEnrollment, validateProfile, ENROLLMENT_RE } from '../shared/validation.ts';
 import { validateSubmission, checkRepository, normalizeEnrollment, normalizeStudentProfile, studentToProfileData, isSubmissionProfileComplete, checkDriveAccessibility } from './validation.ts';
 import { buildSubmissionsCsv, buildSubmissionsJson } from './export.ts';
-import { validateProfile } from '../shared/validation.ts';
-import { deptConfigs, getDeptConfig } from '../shared/submissionConfig.ts';
+import { deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted } from '../shared/submissionConfig.ts';
 
 // ── Submission window (server-side enforcement) ─────────────────────────────
 const SUBMISSION_OPENS = new Date(process.env.SUBMISSION_OPENS_AT || '2025-09-29T00:01:00+05:30');
@@ -24,7 +23,7 @@ function isSubmissionWindowOpen(): boolean {
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '512kb' }));
 const path = resolve(process.env.DB_PATH || './data/submissions.sqlite');
 mkdirSync(dirname(path), { recursive: true });
 const db = new DatabaseSync(path);
@@ -306,23 +305,43 @@ app.post('/api/draft/submit', async (req, res) => {
   for (const deptId of payload.selected) {
     const config = getDeptConfig(deptId);
     if (!config) continue;
+    const answers = deptAnswers[deptId] || {};
     for (const field of config.globalFields) {
-      if (field.urlType === 'drive-folder' && deptAnswers[deptId]?.[field.key]) {
-        const warning = await checkDriveAccessibility(String(deptAnswers[deptId][field.key]));
+      if (isFieldActive(field, answers) && field.urlType === 'drive-folder' && answers[field.key]) {
+        const warning = await checkDriveAccessibility(String(answers[field.key]));
         if (warning) warnings.push(`${config.name}: ${warning}`);
       }
     }
   }
 
-  // Check GitHub repos from dept answers too
+  // Check GitHub repos from dept answers too (only active fields in selected/attempted tasks)
   for (const deptId of payload.selected) {
     const config = getDeptConfig(deptId);
     if (!config) continue;
     const answers = deptAnswers[deptId] || {};
-    for (const field of [...config.globalFields, ...config.tasks.flatMap(t => t.fields)]) {
+    const selectedTasks = config.taskPicker
+      ? (payload.deptSelected?.[deptId] || [])
+      : config.tasks.filter(t => isTaskAttempted(t, answers)).map(t => t.id);
+
+    // Global fields
+    for (const field of config.globalFields) {
+      if (!isFieldActive(field, answers)) continue;
       if (field.urlType === 'github' && answers[field.key]) {
         const result = await checkRepository(answers[field.key]);
         if (!result.ok) { res.status(422).json({ error: `${config.name}: ${result.error}` }); return; }
+      }
+    }
+
+    // Task fields
+    for (const task of config.tasks) {
+      if (!selectedTasks.includes(task.id)) continue;
+      if (!isTaskAttempted(task, answers)) continue;
+      for (const field of task.fields) {
+        if (!isFieldActive(field, answers)) continue;
+        if (field.urlType === 'github' && answers[field.key]) {
+          const result = await checkRepository(answers[field.key]);
+          if (!result.ok) { res.status(422).json({ error: `${config.name} / ${task.name}: ${result.error}` }); return; }
+        }
       }
     }
   }

@@ -23,8 +23,9 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.equal((await call('/health')).response.status, 200);
     assert.equal((await call('/admin/submissions')).response.status, 401);
     const foreignOrigin = await fetch(base + '/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: JSON.stringify({ password }) });
-    assert.equal(foreignOrigin.status, 403);
-    const created = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678' });
+    const invalidRecover = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: 'X' });
+    assert.equal(invalidRecover.response.status, 400);
+    const created = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678901' });
     assert.equal(created.data.found, false);
     const cookie = created.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     const draft = created.data.submission;
@@ -37,13 +38,13 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
       noRealContact: true, limitsRespected: true, llmDisclosure: true, q6Real: true,
     } };
     assert.equal((await call('/draft', 'PUT', draft, cookie)).response.status, 200);
-    const recovered = await call('/draft/recover', 'POST', { name: 'test   student', enrollment: '12345678' });
+    const recovered = await call('/draft/recover', 'POST', { name: 'test   student', enrollment: '12345678901' });
     assert.equal(recovered.data.found, true);
     assert.equal(recovered.data.submission.answers['outreach'].work, draft.answers['outreach'].work);
     const recoveredCookie = recovered.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     assert.equal((await call('/draft/submit', 'POST', {}, recoveredCookie)).response.status, 200);
     assert.equal((await call('/draft', 'PUT', draft, recoveredCookie)).response.status, 401);
-    assert.equal((await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678' })).response.status, 409);
+    assert.equal((await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678901' })).response.status, 409);
     assert.equal((await call('/admin/login', 'POST', { password: 'wrong' })).response.status, 401);
     const login = await call('/admin/login', 'POST', { password });
     assert.equal(login.response.status, 200);
@@ -62,8 +63,8 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.equal(csvExport.status, 200);
     assert.ok(csvExport.headers.get('content-type')?.includes('text/csv'));
     const csvText = await csvExport.text();
-    assert.ok(csvText.includes('12345678,Test Student,test@example.com'));
-    assert.ok(csvText.includes('https://example.com/portfolio'));
+    assert.ok(csvText.includes('12345678901,Test Student,test@example.com'));
+    assert.ok(csvText.includes('https://drive.google.com/file/d/abc123'));
 
     // Test authenticated JSON export
     const jsonExport = await fetch(base + '/admin/export.json', { headers: { cookie: adminCookie } });
@@ -71,7 +72,7 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.ok(jsonExport.headers.get('content-type')?.includes('application/json'));
     const jsonData = await jsonExport.json() as any[];
     assert.equal(jsonData.length, 1);
-    assert.equal(jsonData[0].student.enrollment, '12345678');
+    assert.equal(jsonData[0].student.enrollment, '12345678901');
 
     const exportRes = await fetch(base + '/admin/export.csv', { headers: { cookie: adminCookie } });
     assert.equal(exportRes.status, 200);

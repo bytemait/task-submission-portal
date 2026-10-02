@@ -51,8 +51,7 @@ export function validatePhone(raw: string): string | null {
   return null;
 }
 
-// ── Enrollment ──────────────────────────────────────────────────────────────
-// TODO: Replace with exact college format once confirmed.
+// Accepts full college enrollment or class roll no (e.g. G15 for first years)
 export const ENROLLMENT_RE = /^[A-Z0-9\-/]{2,20}$/;
 export function normalizeEnrollment(raw: string): string {
   return raw.trim().toUpperCase();

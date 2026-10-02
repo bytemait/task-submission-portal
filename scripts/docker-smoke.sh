@@ -50,7 +50,7 @@ const login = await request('/api/admin/login', 'POST', { password });
 if (login.status !== 200) throw Error(`Admin login failed: ${login.status}`);
 const adminCookie = login.headers.getSetCookie().find(c => c.startsWith('admin=') && !c.startsWith('admin=;'))?.split(';')[0] || '';
 if (!adminCookie || (await request('/api/admin/submissions', 'GET', undefined, adminCookie)).status !== 200) throw Error('Authenticated admin API unavailable');
-const initial = await request('/api/draft/recover', 'POST', { name: 'Smoke Student', enrollment: 'SMOKE12345' });
+const initial = await request('/api/draft/recover', 'POST', { name: 'Smoke Student', enrollment: '12345678901' });
 if (initial.status !== 200) throw Error('Draft create failed');
 const draftCookie = initial.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
 const draft = (await initial.json()).submission;
@@ -68,7 +68,7 @@ for i in $(seq 1 60); do
 done
 node --input-type=module <<'NODE'
 const url = process.env.SMOKE_URL;
-const response = await fetch(url + '/api/draft/recover', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify({ name: 'Smoke Student', enrollment: 'SMOKE12345' }) });
+const response = await fetch(url + '/api/draft/recover', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify({ name: 'Smoke Student', enrollment: '12345678901' }) });
 const result = await response.json();
 if (response.status !== 200 || !result.found || result.submission.student.email !== 'smoke@example.invalid') throw Error('Draft did not survive container recreation');
 console.log('Persistent draft after recreation: OK');
@@ -85,7 +85,7 @@ for i in $(seq 1 60); do
 done
 node --input-type=module <<'NODE'
 const url = process.env.SMOKE_URL;
-const response = await fetch(url + '/api/draft/recover', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify({ name: 'Smoke Student', enrollment: 'SMOKE12345' }) });
+const response = await fetch(url + '/api/draft/recover', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify({ name: 'Smoke Student', enrollment: '12345678901' }) });
 const result = await response.json();
 if (response.status !== 200 || !result.found || result.submission.student.email !== 'smoke@example.invalid') throw Error('Restored backup did not contain the draft');
 console.log('Consistent backup restore: OK');
