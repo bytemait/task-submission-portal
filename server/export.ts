@@ -22,78 +22,113 @@ export function escapeCsvCell(raw: unknown): string {
   return value;
 }
 
+function getLegacyKeys(key: string): string[] {
+  const legacy: string[] = [];
+  if (key === 'githubUrl' || key === 'repoUrl' || key === 'forkUrl') legacy.push('repo');
+  if (key === 'deployedUrl' || key === 'liveUrl') legacy.push('demo');
+  if (key === 'note' || key === 'notes' || key === 'generalNote' || key === 'creativeNote') legacy.push('notes');
+  if (key === 'portfolioUrl' || key === 'driveUrl' || key === 'docUrl') legacy.push('work', 'paper', 'writeup');
+  return legacy;
+}
+
 /**
  * Generates an RFC 4180 compliant CSV string from an array of submissions,
- * dynamically mapping tracks and fields based on shared/tracks.ts.
+ * dynamically mapping department task forms based on shared/submissionConfig.ts.
  */
 export function buildSubmissionsCsv(submissions: Submission[]): string {
-  // Base headers for applicant identification.
+  // Clean, unified headers for applicant identification
   const headers = [
-    'Enrollment', 'Name', 'Email', 'Phone', 'Department', 'Year / Semester', 'Other Societies',
-    'Instagram', 'Twitter/X', 'Discord', 'Status', 'Submitted At', 'Last Updated', 'Selected Tracks',
-    'Academic Branch', 'Semester', 'Societies',
+    'Enrollment',
+    'Name',
+    'Email',
+    'Phone',
+    'Branch',
+    'Year',
+    'Semester',
+    'Societies',
+    'Instagram',
+    'Twitter/X',
+    'Discord',
+    'Status',
+    'Submitted At',
+    'Last Updated',
+    'Selected Departments',
   ];
-  const trackColumns: { trackId: string; fieldKey: string; header: string }[] = [];
-  for (const track of tracks) {
-    for (const field of track.fields) {
-      const header = `${track.name} - ${field.label}`;
-      trackColumns.push({ trackId: track.id, fieldKey: field.key, header });
-      headers.push(header);
-    }
-  }
-  const departmentColumns: { deptId: string; fieldKey: string; header: string }[] = [];
+
+  // Dynamic department task columns from the active submission configuration
+  const departmentColumns: { deptId: string; fieldKey: string; legacyKeys: string[]; header: string }[] = [];
 
   for (const dept of deptConfigs) {
     for (const field of dept.globalFields) {
       const header = `${dept.name} - ${field.label}`;
-      departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+      departmentColumns.push({ deptId: dept.id, fieldKey: field.key, legacyKeys: getLegacyKeys(field.key), header });
       headers.push(header);
     }
     for (const task of dept.tasks) {
       for (const field of task.fields) {
         if (field.type === 'toggle') continue;
         const header = `${dept.name} [${task.name}] - ${field.label}`;
-        departmentColumns.push({ deptId: dept.id, fieldKey: field.key, header });
+        departmentColumns.push({ deptId: dept.id, fieldKey: field.key, legacyKeys: getLegacyKeys(field.key), header });
         headers.push(header);
       }
     }
   }
 
-
   const rows: string[] = [headers.map(escapeCsvCell).join(',')];
 
   for (const s of submissions) {
-    const selectedTrackNames = s.selected
-      .map(id => tracks.find(t => t.id === id)?.name || id)
+    const selectedDeptNames = s.selected
+      .map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id)
       .join('; ');
+
+    // Normalize student profile fields with backward compatibility
+    const branch = s.student.academicBranch || s.student.dept || '';
+    const year = s.student.year || '';
+    const semester = s.student.semester || (year.match(/Sem\s*(\d+)/i)?.[1] ? `Sem ${year.match(/Sem\s*(\d+)/i)![1]}` : '');
+    const societies = (s.student.societies && s.student.societies.length > 0)
+      ? s.student.societies.join('; ')
+      : (s.student.otherSocieties || '');
+    const instagram = s.student.instagram || s.student.socials?.instagram || '';
+    const twitter = s.student.twitter || s.student.socials?.twitter || '';
+    const discord = s.student.discord || s.student.socials?.discord || '';
 
     const row = [
       escapeCsvCell(s.student.enrollment),
       escapeCsvCell(s.student.name),
       escapeCsvCell(s.student.email),
       escapeCsvCell(s.student.phone),
-      escapeCsvCell(s.student.dept || ''),
-      escapeCsvCell(s.student.year),
-      escapeCsvCell(s.student.otherSocieties || ''),
-      escapeCsvCell(s.student.instagram || s.student.socials?.instagram || ''),
-      escapeCsvCell(s.student.twitter || s.student.socials?.twitter || ''),
-      escapeCsvCell(s.student.discord || s.student.socials?.discord || ''),
+      escapeCsvCell(branch),
+      escapeCsvCell(year),
+      escapeCsvCell(semester),
+      escapeCsvCell(societies),
+      escapeCsvCell(instagram),
+      escapeCsvCell(twitter),
+      escapeCsvCell(discord),
       escapeCsvCell(s.status),
       escapeCsvCell(s.submittedAt || ''),
       escapeCsvCell(s.updatedAt || ''),
-      escapeCsvCell(selectedTrackNames),
-      escapeCsvCell(s.student.academicBranch || ''),
-      escapeCsvCell(s.student.semester || ''),
-      escapeCsvCell((s.student.societies || []).join('; ')),
+      escapeCsvCell(selectedDeptNames),
     ];
 
-    for (const col of trackColumns) {
-      row.push(escapeCsvCell(s.answers?.[col.trackId]?.[col.fieldKey] || ''));
-    }
-
     for (const col of departmentColumns) {
-      const value = s.deptAnswers?.[col.deptId]?.[col.fieldKey] ?? s.answers?.[col.deptId]?.[col.fieldKey] ?? '';
-      row.push(escapeCsvCell(Array.isArray(value) ? value.join('; ') : value));
+      let value = s.deptAnswers?.[col.deptId]?.[col.fieldKey] ?? s.answers?.[col.deptId]?.[col.fieldKey];
+
+      // If value is not set under the primary key, check legacy keys
+      if (value === undefined && col.legacyKeys) {
+        for (const lk of col.legacyKeys) {
+          const lv = s.deptAnswers?.[col.deptId]?.[lk] ?? s.answers?.[col.deptId]?.[lk];
+          if (lv !== undefined) {
+            value = lv;
+            break;
+          }
+        }
+      }
+
+      const cellValue = value !== undefined && value !== null
+        ? (Array.isArray(value) ? value.join('; ') : String(value))
+        : '';
+
+      row.push(escapeCsvCell(cellValue));
     }
 
     rows.push(row.join(','));

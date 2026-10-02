@@ -24,28 +24,30 @@ test('escapeCsvCell: mitigates CSV formula injection', () => {
   assert.equal(escapeCsvCell('=cmd|"/C calc"!A0'), '"\'=cmd|""/C calc""!A0"');
 });
 
-test('buildSubmissionsCsv: builds complete CSV with correct headers and track answers', () => {
+test('buildSubmissionsCsv: builds complete CSV with correct headers and department answers', () => {
   const sampleSubmission: Submission = {
     student: {
       name: 'John Doe',
       enrollment: '0241MAIT',
       email: 'john@example.com',
       phone: '9876543210',
-      dept: 'CSE',
-      year: '2nd year (Sem 4)',
-      otherSocieties: 'None',
-      socials: {
-        instagram: '@johndoe',
-        twitter: '@johndoe_dev',
-        discord: 'johndoe#1234'
-      }
+      academicBranch: 'CSE',
+      year: '2',
+      semester: '4',
+      inOtherSocieties: false,
+      societies: [],
+      instagram: '@johndoe',
+      twitter: '@johndoe_dev',
+      discord: 'johndoe#1234'
     },
     selected: ['web-dev'],
-    answers: {
+    answers: {},
+    deptAnswers: {
       'web-dev': {
-        repo: 'https://github.com/johndoe/project',
-        demo: 'https://demo.example.com',
-        notes: 'Built with React and Vite,\nand lots of coffee.'
+        forkUrl: 'https://github.com/johndoe/canteen-chaos',
+        repoUrl: 'https://github.com/johndoe/gym-booking',
+        liveUrl: 'https://gym.johndoe.dev',
+        reviewerNote: 'Built with React and Vite,\nand lots of coffee.'
       }
     },
     status: 'submitted',
@@ -58,12 +60,12 @@ test('buildSubmissionsCsv: builds complete CSV with correct headers and track an
 
   assert.ok(lines.length >= 2);
   const headerLine = lines[0];
-  assert.ok(headerLine.includes('Enrollment,Name,Email,Phone,Department,Year / Semester,Other Societies,Instagram,Twitter/X,Discord,Status,Submitted At,Last Updated,Selected Tracks'));
-  assert.ok(headerLine.includes('Web Development - Public GitHub repository'));
+  assert.ok(headerLine.includes('Enrollment,Name,Email,Phone,Branch,Year,Semester,Societies,Instagram,Twitter/X,Discord,Status,Submitted At,Last Updated,Selected Departments'));
+  assert.ok(headerLine.includes('Web Development [Task 2 — Gym Slot Booking] - GitHub repository URL'));
 
   const dataLine = lines[1];
-  assert.ok(dataLine.includes('0241MAIT,John Doe,john@example.com,9876543210,CSE,2nd year (Sem 4),None,\'@johndoe,\'@johndoe_dev,johndoe#1234,submitted'));
-  assert.ok(dataLine.includes('https://github.com/johndoe/project'));
+  assert.ok(dataLine.includes('0241MAIT,John Doe,john@example.com,9876543210,CSE,2,4,,\'@johndoe,\'@johndoe_dev,johndoe#1234,submitted'));
+  assert.ok(dataLine.includes('https://github.com/johndoe/canteen-chaos'));
   assert.ok(dataLine.includes('"Built with React and Vite,\nand lots of coffee."'));
 });
 
