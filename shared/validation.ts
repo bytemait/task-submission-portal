@@ -51,16 +51,15 @@ export function validatePhone(raw: string): string | null {
   return null;
 }
 
-// ── Enrollment ──────────────────────────────────────────────────────────────
-// Confirmed format: exactly 11 digits, numeric only.
-export const ENROLLMENT_RE = /^\d{11}$/;
+// Accepts full college enrollment or class roll no (e.g. G15 for first years)
+export const ENROLLMENT_RE = /^[A-Z0-9\-/]{2,20}$/;
 export function normalizeEnrollment(raw: string): string {
-  return raw.trim();
+  return raw.trim().toUpperCase();
 }
 export function validateEnrollment(raw: string): string | null {
   const v = normalizeEnrollment(raw);
   if (!v) return 'Enrollment number is required.';
-  if (!ENROLLMENT_RE.test(v)) return 'Enter your 11-digit enrollment number.';
+  if (!ENROLLMENT_RE.test(v)) return 'Enter a valid enrollment/class roll no (2–20 letters or digits, e.g. G15 or 0241MAIT123).';
   return null;
 }
 

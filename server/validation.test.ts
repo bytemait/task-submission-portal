@@ -588,13 +588,13 @@ test('selecting ML department (ml) or combinations with ML is valid in draft and
 // ── Enrollment: 11-digit numeric validation ─────────────────────────────────
 import { validateEnrollment, normalizeEnrollment } from '../shared/validation.ts';
 
-test('enrollment accepts exactly 11 digits', () => {
+test('enrollment accepts valid enrollment or class roll no', () => {
   assert.equal(validateEnrollment('12345678901'), null);
-  assert.ok(validateEnrollment('ABC123'));       // old alpha format rejected
-  assert.ok(validateEnrollment('1234567890'));   // 10 digits
-  assert.ok(validateEnrollment('123456789012')); // 12 digits
-  assert.ok(validateEnrollment(''));             // empty
-  assert.equal(normalizeEnrollment('  12345678901  '), '12345678901');
+  assert.equal(validateEnrollment('G15'), null);
+  assert.equal(validateEnrollment('0241MAIT123'), null);
+  assert.ok(validateEnrollment('X'));             // too short (< 2 chars)
+  assert.ok(validateEnrollment(''));              // empty
+  assert.equal(normalizeEnrollment('  g15  '), 'G15');
 });
 
 // ── Paper Craft: select paper, optional repo, required template ─────────────

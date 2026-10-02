@@ -23,7 +23,7 @@ test('API: draft recovery, autosave, immutable submission and admin access', { t
     assert.equal((await call('/health')).response.status, 200);
     assert.equal((await call('/admin/submissions')).response.status, 401);
     const foreignOrigin = await fetch(base + '/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: JSON.stringify({ password }) });
-    const invalidRecover = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678' });
+    const invalidRecover = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: 'X' });
     assert.equal(invalidRecover.response.status, 400);
     const created = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678901' });
     assert.equal(created.data.found, false);

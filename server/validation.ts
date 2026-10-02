@@ -91,7 +91,7 @@ export function validateSubmission(data: Submission, final: boolean): string[] {
   const errors: string[] = [];
   if (!data || typeof data !== 'object' || !data.student || typeof data.student !== 'object' || !Array.isArray(data.selected) || !data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) return ['Invalid submission.'];
   const { name, enrollment, email, phone, dept, year, otherSocieties, socials } = data.student;
-  if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100 || typeof enrollment !== 'string' || !/^\d{11}$/.test(enrollment)) errors.push('Enter a valid name and enrollment number.');
+  if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100 || typeof enrollment !== 'string' || !/^[A-Z0-9/\-]{2,30}$/.test(enrollment)) errors.push('Enter a valid name and enrollment number.');
   if (typeof email !== 'string' || email.length > 254 || email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
   if (typeof phone !== 'string' || phone.length > 20 || phone && !/^[\d+()\s-]{7,20}$/.test(phone)) errors.push('Enter a valid phone number.');
   if (dept !== undefined && (typeof dept !== 'string' || dept.length > 100)) errors.push('Invalid department.');
