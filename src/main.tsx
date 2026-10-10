@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowRight, ArrowLeft, ArrowUpRight, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FolderTree as FolderTreeIcon, LockKeyhole, LogOut, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { ArrowRight, ArrowLeft, ArrowUpRight, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FolderTree as FolderTreeIcon, LockKeyhole, LogOut, Pencil, Plus, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { tracks, emptySubmission, type Submission, type Student, type Field } from '../shared/tracks.ts';
 import {
   validateName, validateEmail, validatePhone, validateEnrollment,
-  validateAcademicBranch, validateYear, validateSemester,
+  validateAcademicBranch, validateSemester,
   validateSocieties, validateInstagram, validateTwitter, validateDiscord,
   normalizePhone, normalizeInstagram, normalizeTwitter, normalizeDiscord,
-  ACADEMIC_BRANCHES, semestersForYear,
+  ACADEMIC_BRANCHES, APPLICANT_SEMESTERS, yearForSemester, ENROLLMENT_MAX_LENGTH,
   type ProfileErrors,
 } from '../shared/validation.ts';
 import {
@@ -390,8 +390,8 @@ function DeptForm({ config, answers, selectedTasks, onAnswer, onSelectTasks, yea
 // ── Shared components ───────────────────────────────────────────────────────
 function Brand() { return <a className="brand" href="/" aria-label="BYTE home"><span className="brand-mark">B<span>.</span></span><span className="brand-type">BYTE<span className="brand-sub">MAIT TECH SOCIETY</span></span></a>; }
 function Shell({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) { return <div className="app"><header className="topbar"><Brand/><div className="topbar-right"><span className="top-label">RECRUITMENT / 2026</span><a className="top-link" href={admin ? '/' : '/login'}>{admin ? 'Submit a task' : 'Admin access'} <ArrowUpRight size={15}/></a></div></header>{children}<footer className="footer"><span>© 2026 BYTE MAIT</span><span>Made for the next generation of builders.</span><a href="https://bytesoc.dev/tasks/" target="_blank" rel="noreferrer">Explore tasks <ArrowUpRight size={13}/></a></footer></div>; }
-function FieldInput({ id, label, value, onChange, type = 'text', hint, required, onBlur, disabled, error, autoComplete, inputMode, ariaDescribedBy }: {
-  id: string; label: string; value: string; onChange: (v: string) => void; type?: string; hint?: string; required?: boolean; onBlur?: () => void; disabled?: boolean; error?: string; autoComplete?: string; inputMode?: string; ariaDescribedBy?: string;
+function FieldInput({ id, label, value, onChange, type = 'text', hint, required, onBlur, disabled, error, autoComplete, inputMode, ariaDescribedBy, maxLength }: {
+  id: string; label: string; value: string; onChange: (v: string) => void; type?: string; hint?: string; required?: boolean; onBlur?: () => void; disabled?: boolean; error?: string; autoComplete?: string; inputMode?: string; ariaDescribedBy?: string; maxLength?: number;
 }) {
   const errorId = id + '-error';
   const hintId = id + '-hint';
@@ -400,7 +400,7 @@ function FieldInput({ id, label, value, onChange, type = 'text', hint, required,
     <label htmlFor={id}>{label}{required && <span className="required"> *</span>}{!required && <span className="optional"> (optional)</span>}</label>
     {type === 'textarea' ? <textarea id={id} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} placeholder="A little context goes a long way..." rows={3} aria-describedby={describedBy} aria-invalid={!!error}/> :
     <input id={id} type={type} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} disabled={disabled}
-      autoComplete={autoComplete} inputMode={inputMode as any}
+      autoComplete={autoComplete} inputMode={inputMode as any} maxLength={maxLength}
       aria-describedby={describedBy} aria-invalid={!!error}
       placeholder={type === 'url' ? 'https://...' : label === 'Full name' ? 'Your name, as on college records' : label === 'Enrollment number' ? 'e.g. 12345678901' : ''}/>}
     {hint && <p className="hint" id={hintId}>{hint}</p>}
@@ -441,21 +441,8 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
   onBatchChange: (updates: Partial<Student>) => void;
   errors: ProfileErrors; onBlur: (key: string) => void; disabled?: boolean;
 }) {
-  const yearNum = data.year ? parseInt(data.year, 10) : 0;
-  const validSemesters = yearNum >= 1 && yearNum <= 4 ? semestersForYear(yearNum) : null;
-
-  const handleYearChange = (v: string) => {
-    // Atomic update: set year and conditionally clear invalid semester in one call
-    const updates: Partial<Student> = { year: v };
-    if (v && data.semester) {
-      const y = parseInt(v, 10);
-      const s = parseInt(data.semester, 10);
-      if (y >= 1 && y <= 4) {
-        const [lo, hi] = semestersForYear(y);
-        if (s < lo || s > hi) updates.semester = '';
-      }
-    }
-    onBatchChange(updates);
+  const handleSemesterChange = (semester: string) => {
+    onBatchChange({ semester, year: yearForSemester(semester) });
   };
 
   return <>
@@ -468,7 +455,7 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
         onChange={v => onChange('name', v)} onBlur={() => onBlur('name')}
         error={errors.name} autoComplete="name" hint={disabled ? 'Locked to your active draft session.' : undefined}/>
 
-      <FieldInput id="enrollment" label="Enrollment number" required value={data.enrollment} disabled={disabled}
+      <FieldInput id="enrollment" label="Enrollment number" required value={data.enrollment} disabled={disabled} maxLength={ENROLLMENT_MAX_LENGTH}
         onChange={v => onChange('enrollment', v)} onBlur={() => onBlur('enrollment')}
         error={errors.enrollment} hint={disabled ? 'Locked to your active draft session.' : 'Your college enrollment/class roll no'}/>
 
@@ -493,26 +480,11 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
       </div>
 
       <div className="form-field">
-        <label htmlFor="year">Year of study <span className="required">*</span></label>
-        <select id="year" value={data.year} onChange={e => handleYearChange(e.target.value)}
-          onBlur={() => onBlur('year')} aria-invalid={!!errors.year}>
-          <option value="">Select year</option>
-          {[1, 2, 3, 4].map(y => <option key={y} value={String(y)}>{y === 1 ? '1st' : y === 2 ? '2nd' : y === 3 ? '3rd' : '4th'} year</option>)}
-        </select>
-        {errors.year && <p className="field-error" role="alert">{errors.year}</p>}
-      </div>
-
-      <div className="form-field">
         <label htmlFor="semester">Semester <span className="required">*</span></label>
-        <select id="semester" value={data.semester || ''} onChange={e => onChange('semester', e.target.value)}
-          onBlur={() => onBlur('semester')} aria-invalid={!!errors.semester}
-          disabled={!data.year}>
+        <select id="semester" value={data.semester || ''} onChange={e => handleSemesterChange(e.target.value)}
+          onBlur={() => onBlur('semester')} aria-invalid={!!errors.semester}>
           <option value="">Select semester</option>
-          {validSemesters ? [validSemesters[0], validSemesters[1]].map(s =>
-            <option key={s} value={String(s)}>Semester {s}</option>
-          ) : [1,2,3,4,5,6,7,8].map(s =>
-            <option key={s} value={String(s)}>Semester {s}</option>
-          )}
+          {APPLICANT_SEMESTERS.map(s => <option key={s} value={String(s)}>Semester {s}</option>)}
         </select>
         {errors.semester && <p className="field-error" role="alert">{errors.semester}</p>}
       </div>
@@ -574,6 +546,8 @@ function Wizard() {
       ...emptySubmission().student,
       ...sub.student,
       academicBranch: sub.student.academicBranch || sub.student.dept || '',
+      semester: yearForSemester(sub.student.semester) ? sub.student.semester : '',
+      year: yearForSemester(sub.student.semester),
       inOtherSocieties: sub.student.inOtherSocieties ?? Boolean(sub.student.otherSocieties?.trim()),
       societies: sub.student.societies || (sub.student.otherSocieties ? [sub.student.otherSocieties] : []),
       instagram: sub.student.instagram || sub.student.socials?.instagram || '',
@@ -600,7 +574,7 @@ function Wizard() {
       setActive(true);
       setFound(true);
       // Check profile completion
-      checkProfileCompletion(d.student);
+      checkProfileCompletion(normalized.student);
     }).catch(() => {
       // No active server session — check sessionStorage for local draft
       try {
@@ -637,9 +611,7 @@ function Wizard() {
     if (enrollErr) errs.enrollment = enrollErr;
     const branchErr = validateAcademicBranch(student.academicBranch || '');
     if (branchErr) errs.academicBranch = branchErr;
-    const yearErr = validateYear(student.year);
-    if (yearErr) errs.year = yearErr;
-    const semErr = validateSemester(student.semester || '', student.year);
+    const semErr = validateSemester(student.semester || '', yearForSemester(student.semester));
     if (semErr) errs.semester = semErr;
     const socErr = validateSocieties(!!student.inOtherSocieties, student.societies || []);
     if (socErr) errs.societies = socErr;
@@ -717,8 +689,7 @@ function Wizard() {
       case 'phone': err = validatePhone(s.phone); break;
       case 'enrollment': err = validateEnrollment(s.enrollment); break;
       case 'academicBranch': err = validateAcademicBranch(s.academicBranch || ''); break;
-      case 'year': err = validateYear(s.year); break;
-      case 'semester': err = validateSemester(s.semester || '', s.year); break;
+      case 'semester': err = validateSemester(s.semester || '', yearForSemester(s.semester)); break;
       case 'instagram': err = validateInstagram(s.instagram || ''); break;
       case 'twitter': err = validateTwitter(s.twitter || ''); break;
       case 'discord': err = validateDiscord(s.discord || ''); break;
@@ -730,11 +701,17 @@ function Wizard() {
     });
   }, []);
   async function recover() {
-    if (active || recovering || data.student.name.trim().length < 2 || data.student.enrollment.trim().length < 4) return false;
+    if (active || recovering || data.student.name.trim().length < 2) return false;
+    const enrollmentError = validateEnrollment(data.student.enrollment);
+    if (enrollmentError) {
+      setProfileErrors(prev => ({ ...prev, enrollment: enrollmentError }));
+      setError(enrollmentError);
+      return false;
+    }
     setRecovering(true); setError('');
     try {
       const result = await post<{ found: boolean; submission: Submission }>('/draft/recover', { name: data.student.name, enrollment: data.student.enrollment });
-      const restored = result.found ? result.submission : { ...result.submission, student: { ...data.student, name: result.submission.student.name, enrollment: result.submission.student.enrollment } };
+      const restored = normalizeLoadedSubmission(result.found ? result.submission : { ...result.submission, student: { ...data.student, name: result.submission.student.name, enrollment: result.submission.student.enrollment } });
       setData(restored); latest.current = restored; version.current = result.found ? 0 : 1; saved.current = 0;
       setFound(result.found); setActive(true);
       setSaveState(result.found ? 'Existing draft recovered' : 'Draft started · autosave is on');
@@ -963,7 +940,6 @@ function Wizard() {
   {step === 0 && <>
     {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> We found your draft and picked up where you left off.</div>}
     <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active}/>
-    <div className="notice"><ShieldCheck size={19}/><span>Already started? Enter the same name and enrollment number and we'll recover your draft. Anyone with these details may access it; avoid entering sensitive information.</span></div>
   </>}
 
   {step === 1 && <><div className="section-icon">02 — FIND YOUR THING</div><h1>Choose your <em>departments.</em></h1><p className="lead">Pick one or go for a few. There's no limit to where curiosity can take you.</p>
@@ -1018,7 +994,7 @@ function Wizard() {
   {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">Take a moment to review everything. Once submitted, your application can't be edited.</p>
     <div className="review-block"><div className="review-head"><span>APPLICANT PROFILE</span><button onClick={() => setStep(0)}>Edit <ArrowUpRight size={14}/></button></div>
       <h2>{data.student.name}</h2>
-      <p>{data.student.enrollment} · {data.student.academicBranch || '—'} · Year {data.student.year}, Sem {data.student.semester || '—'}</p>
+      <p>{data.student.enrollment} · {data.student.academicBranch || '—'} · Semester {data.student.semester || '—'}</p>
       <p>{data.student.email} · {data.student.phone}</p>
       {data.student.inOtherSocieties && (data.student.societies || []).length > 0 && <p>Societies: {(data.student.societies || []).join(', ')}</p>}
       {(data.student.instagram || data.student.twitter || data.student.discord) && <p className="review-handles">
@@ -1096,8 +1072,41 @@ function Login() {
 function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [mutating, setMutating] = useState<'draft' | 'delete' | null>(null);
+  const [actionError, setActionError] = useState('');
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
   const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name || '', s.student.enrollment || '', s.student.email || ''].some(v => v.toLowerCase().includes(query.toLowerCase())));
+
+  async function changeSubmission(action: 'draft' | 'delete') {
+    if (!selected || mutating) return;
+    const entry = selected;
+    const label = `${entry.student.name} (${entry.student.enrollment})`;
+    const message = action === 'delete'
+      ? `Permanently delete the entry for ${label}? All saved profile details and answers will be removed. This cannot be undone.`
+      : `Move the submission for ${label} back to draft? Their answers will be preserved and they can resume editing. Resubmission still requires an open submission window.`;
+    if (!window.confirm(message)) return;
+    setMutating(action);
+    setActionError('');
+    try {
+      const result = await api<Submission>('/admin/submissions', {
+        method: action === 'delete' ? 'DELETE' : 'PATCH',
+        body: JSON.stringify({
+          enrollment: entry.student.enrollment,
+          ...(action === 'draft' ? { status: 'draft' } : {}),
+        }),
+      });
+      if (action === 'delete') {
+        setItems(current => current.filter(s => s.student.enrollment !== entry.student.enrollment));
+        setSelected(null);
+      } else {
+        setItems(current => [result, ...current.filter(s => s.student.enrollment !== entry.student.enrollment)]);
+        setSelected(result);
+      }
+    } catch (e) {
+      if ((e as any).status === 401) location.assign('/login');
+      else setActionError((e as Error).message);
+    } finally { setMutating(null); }
+  }
 
   async function exportCSV() {
     setExporting(true);
@@ -1131,8 +1140,14 @@ function Admin() {
     finally { setExporting(false); }
   }
 
-  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div><div className="stats"><div><small>TOTAL APPLICATIONS</small><strong>{items.length}</strong></div><div><small>SUBMITTED</small><strong>{items.filter(i => i.status === 'submitted').length}</strong></div><div><small>IN PROGRESS</small><strong>{items.filter(i => i.status === 'draft').length}</strong></div><div><small>DEPARTMENTS</small><strong>{deptConfigs.length}</strong></div></div><div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => setSelected(s)}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
-  {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span><div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div><h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {
+  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div><div className="stats"><div><small>TOTAL APPLICATIONS</small><strong>{items.length}</strong></div><div><small>SUBMITTED</small><strong>{items.filter(i => i.status === 'submitted').length}</strong></div><div><small>IN PROGRESS</small><strong>{items.filter(i => i.status === 'draft').length}</strong></div><div><small>DEPARTMENTS</small><strong>{deptConfigs.length}</strong></div></div><div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
+  {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span>
+  <div className="detail-actions" aria-busy={!!mutating}>
+    {selected.status === 'submitted' && <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}><Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}</button>}
+    <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}><Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}</button>
+  </div>
+  {actionError && <p className="error-banner" role="alert">{actionError}</p>}
+  <div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div><h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {
     const config = getDeptConfig(deptId);
     const deptAns = (selected.deptAnswers || {})[deptId] || {};
     const legacyAns = selected.answers?.[deptId] || {};

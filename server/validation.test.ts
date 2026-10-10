@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkRepository, repoCoordinates, validateSubmission, isSubmissionProfileComplete } from './validation.ts';
+import { checkRepository, repoCoordinates, validateSubmission, isSubmissionProfileComplete, normalizeStudentProfile } from './validation.ts';
 import { emptySubmission } from '../shared/tracks.ts';
 import {
   normalizePhone, validatePhone, normalizeInstagram, normalizeTwitter,
   normalizeDiscord, validateInstagram, validateTwitter, validateDiscord,
   validateSemester, validateYear, validateSocieties, validateProfile,
-  isProfileComplete,
+  isProfileComplete, APPLICANT_SEMESTERS, yearForSemester,
 } from '../shared/validation.ts';
 
 test('only exact GitHub repository URLs are accepted', () => {
@@ -78,6 +78,19 @@ test('year/semester dependency', () => {
   assert.equal(validateSemester('7', '4'), null);
   assert.equal(validateSemester('8', '4'), null);
   assert.ok(validateSemester('1', '4')); // sem 1 not valid for year 4
+});
+
+test('applicant semesters derive the internal study year', () => {
+  assert.deepEqual(APPLICANT_SEMESTERS, [1, 2, 3, 4, 5]);
+  for (const [semester, year] of [['1', '1'], ['2', '1'], ['3', '2'], ['4', '2'], ['5', '3']]) {
+    assert.equal(yearForSemester(semester), year);
+    assert.equal(yearForSemester(Number(semester)), year);
+    const student = { ...emptySubmission().student, semester, year: '4' };
+    assert.equal(normalizeStudentProfile(student).year, year);
+  }
+  for (const semester of ['', '6', '7', '8', '3abc', '1.5', undefined]) {
+    assert.equal(yearForSemester(semester), '');
+  }
 });
 
 // ── Society toggle clearing ─────────────────────────────────────────────────
@@ -585,15 +598,24 @@ test('selecting ML department (ml) or combinations with ML is valid in draft and
   assert.deepEqual(validateSubmission(sub, false), []);
 });
 
-// ── Enrollment: 11-digit numeric validation ─────────────────────────────────
+// ── Enrollment: required, up to 14 characters ────────────────────────────────
 import { validateEnrollment, normalizeEnrollment } from '../shared/validation.ts';
 
-test('enrollment accepts valid enrollment or class roll no', () => {
-  assert.equal(validateEnrollment('12345678901'), null);
-  assert.equal(validateEnrollment('G15'), null);
-  assert.equal(validateEnrollment('0241MAIT123'), null);
-  assert.ok(validateEnrollment('X'));             // too short (< 2 chars)
-  assert.ok(validateEnrollment(''));              // empty
+test('enrollment is required and accepts any format up to 14 characters', () => {
+  for (const enrollment of ['1', 'X', 'G15', '12345678901', '0241MAIT123', '12345678901234', 'roll #1', 'A.B']) {
+    assert.equal(validateEnrollment(enrollment), null);
+    const draft = emptySubmission();
+    draft.student.name = 'Test Student';
+    draft.student.enrollment = enrollment;
+    assert.deepEqual(validateSubmission(draft, false), []);
+  }
+  for (const enrollment of ['', '   ', '123456789012345']) {
+    assert.ok(validateEnrollment(enrollment));
+    const draft = emptySubmission();
+    draft.student.name = 'Test Student';
+    draft.student.enrollment = enrollment;
+    assert.ok(validateSubmission(draft, false).length > 0);
+  }
   assert.equal(normalizeEnrollment('  g15  '), 'G15');
 });
 
