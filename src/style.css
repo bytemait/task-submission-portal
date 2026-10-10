@@ -52,6 +52,7 @@
 /* ── Department helper hint ───────────────────────────────────────────── */
 .dept-helper-hint{font-size:13px;color:#a5bfa3;margin-bottom:16px;line-height:1.6;padding:12px 16px;background:#0f221a;border-radius:4px;border-left:3px solid #baf263}
 
+.detail-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}.export-btn.danger{background:#422820;border-color:#9d5c4b;color:#ffcbc1}.export-btn.danger:hover:not(:disabled){background:#59342b}.detail-top button:disabled{opacity:.5;cursor:not-allowed}
 .admin-actions{display:flex;gap:10px;align-items:flex-start}.export-btn{background:#19301f;border:1px solid #3e6043;color:#baf263;display:flex;gap:10px;align-items:center;padding:11px 14px;border-radius:4px;font-size:13px;font-weight:600;transition:background .2s}.export-btn:hover{background:#244a2e}.export-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* ── Existing admin/login styles ───────────────────────────────────────── */

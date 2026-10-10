@@ -51,15 +51,15 @@ export function validatePhone(raw: string): string | null {
   return null;
 }
 
-// Accepts full college enrollment or class roll no (e.g. G15 for first years)
-export const ENROLLMENT_RE = /^[A-Z0-9\-/]{2,20}$/;
+// Enrollment/class roll no is required, with no format or minimum-length restriction.
+export const ENROLLMENT_MAX_LENGTH = 14;
 export function normalizeEnrollment(raw: string): string {
   return raw.trim().toUpperCase();
 }
 export function validateEnrollment(raw: string): string | null {
   const v = normalizeEnrollment(raw);
   if (!v) return 'Enrollment number is required.';
-  if (!ENROLLMENT_RE.test(v)) return 'Enter a valid enrollment/class roll no (2–20 letters or digits, e.g. G15 or 0241MAIT123).';
+  if (v.length > ENROLLMENT_MAX_LENGTH) return `Enrollment/class roll no must be at most ${ENROLLMENT_MAX_LENGTH} characters.`;
   return null;
 }
 
@@ -77,6 +77,12 @@ export function validateAcademicBranch(raw: string): string | null {
 
 // ── Year & Semester ─────────────────────────────────────────────────────────
 export const VALID_YEARS = [1, 2, 3, 4] as const;
+export const APPLICANT_SEMESTERS = [1, 2, 3, 4, 5] as const;
+export function yearForSemester(semester: unknown): string {
+  const s = typeof semester === 'string' ? Number(semester) : semester;
+  return typeof s === 'number' && APPLICANT_SEMESTERS.some(value => value === s)
+    ? String(Math.ceil(s / 2)) : '';
+}
 export function semestersForYear(year: number): [number, number] {
   return [year * 2 - 1, year * 2];
 }

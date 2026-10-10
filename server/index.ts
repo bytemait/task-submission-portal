@@ -5,7 +5,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tracks, type Submission } from '../shared/tracks.ts';
-import { validateEnrollment, validateProfile, ENROLLMENT_RE } from '../shared/validation.ts';
+import { validateEnrollment, validateProfile, yearForSemester } from '../shared/validation.ts';
 import { validateSubmission, checkRepository, normalizeEnrollment, normalizeStudentProfile, studentToProfileData, isSubmissionProfileComplete, checkDriveAccessibility } from './validation.ts';
 import { buildSubmissionsCsv, buildSubmissionsJson } from './export.ts';
 import { deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted } from '../shared/submissionConfig.ts';
@@ -265,6 +265,7 @@ app.put('/api/draft', (req, res) => {
   const row = getRow(s.enrollment!); if (!row || row.status !== 'draft') { res.status(409).json({ error: 'This draft is already submitted.' }); return; }
   const payload = req.body as Submission;
   if (!payload || typeof payload.student?.enrollment !== 'string' || typeof payload.student?.name !== 'string' || normalizeEnrollment(payload.student.enrollment) !== s.enrollment || cleanName(payload.student.name) !== row.name_key) { res.status(400).json({ error: 'Name and enrollment cannot be changed after starting a draft.' }); return; }
+  payload.student = { ...payload.student, year: yearForSemester(payload.student.semester) || payload.student.year };
   const errors = validateSubmission(payload, false);
   if (errors.length) { res.status(400).json({ error: errors[0] }); return; }
   const now = new Date().toISOString();
@@ -371,6 +372,42 @@ app.get('/api/admin/submissions', (req, res) => {
   const rows = db.prepare('SELECT * FROM submissions ORDER BY updated_at DESC').all() as Row[];
   res.json(rows.map(row => ({ ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at })));
 });
+function getAdminTargetEnrollment(req: express.Request): string | null {
+  const raw = req.body?.enrollment ?? req.query.enrollment ?? req.params.enrollment;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  return normalizeEnrollment(raw);
+}
+const handleAdminMoveToDraft: express.RequestHandler = (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  if (req.body?.status !== 'draft') { res.status(400).json({ error: 'Only moving a submitted entry to draft is supported.' }); return; }
+  const enrollment = getAdminTargetEnrollment(req);
+  if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
+  const row = getRow(enrollment);
+  if (!row) { res.status(404).json({ error: 'Submission not found.' }); return; }
+  if (row.status !== 'submitted') { res.status(409).json({ error: 'This entry is already a draft.' }); return; }
+  const now = new Date().toISOString();
+  const submission: Submission = { ...JSON.parse(row.payload), status: 'draft', updatedAt: now };
+  delete submission.submittedAt;
+  db.prepare("UPDATE submissions SET payload=?,status='draft',updated_at=?,submitted_at=NULL WHERE enrollment=? AND status='submitted'")
+    .run(JSON.stringify(submission), now, enrollment);
+  res.json(submission);
+};
+const handleAdminDelete: express.RequestHandler = (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const enrollment = getAdminTargetEnrollment(req);
+  if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
+  const result = db.prepare('DELETE FROM submissions WHERE enrollment=?').run(enrollment);
+  if (!result.changes) { res.status(404).json({ error: 'Submission not found.' }); return; }
+  // Old draft sessions must not gain access if this enrollment creates a new entry.
+  for (const [id, s] of sessions) {
+    if (s.role === 'draft' && s.enrollment === enrollment) sessions.delete(id);
+  }
+  res.json({ ok: true });
+};
+app.patch('/api/admin/submissions', handleAdminMoveToDraft);
+app.patch('/api/admin/submissions/:enrollment', handleAdminMoveToDraft);
+app.delete('/api/admin/submissions', handleAdminDelete);
+app.delete('/api/admin/submissions/:enrollment', handleAdminDelete);
 app.get('/api/admin/export.csv', (req, res) => {
   if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
   const rows = db.prepare('SELECT * FROM submissions ORDER BY status DESC, updated_at DESC').all() as Row[];
