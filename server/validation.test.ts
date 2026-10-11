@@ -244,16 +244,17 @@ test('Manga JSONL validation', () => {
 // ── ML year rule ────────────────────────────────────────────────────────────
 import { getDeptConfig } from '../shared/submissionConfig.ts';
 
-test('ML year-based task selection rules', () => {
+test('ML year-based task selection rules (minimum 2 tasks, no max limit)', () => {
   const ml = getDeptConfig('ml')!;
   assert.ok(ml);
   const rule = ml.yearRule!;
 
-  // Must pick exactly 2
+  // Must pick at least 2
   assert.ok(rule(1, ['agentic-task'])); // only 1
-  assert.ok(rule(1, ['agentic-task', 'manga-task', 'ml-research-basic'])); // 3
+  assert.equal(rule(1, ['agentic-task', 'manga-task', 'ml-research-basic']), null); // 3 tasks is valid
+  assert.equal(rule(1, ['agentic-task', 'manga-task', 'ml-research-basic', 'ml-research-advanced']), null); // 4 tasks is valid
 
-  // 1st year: any two OK
+  // 1st year: any two or more OK
   assert.equal(rule(1, ['agentic-task', 'ml-research-basic']), null);
   assert.equal(rule(1, ['manga-task', 'ml-research-advanced']), null);
 
@@ -261,10 +262,13 @@ test('ML year-based task selection rules', () => {
   assert.ok(rule(2, ['agentic-task', 'ml-research-basic'])); // both basic
   assert.equal(rule(2, ['agentic-task', 'manga-task']), null); // one advanced
   assert.equal(rule(2, ['manga-task', 'ml-research-advanced']), null); // both advanced
+  assert.equal(rule(2, ['agentic-task', 'ml-research-basic', 'manga-task']), null); // 3 tasks with one advanced
 
-  // 3rd year: both advanced
-  assert.ok(rule(3, ['agentic-task', 'manga-task'])); // one basic
+  // 3rd year: at least two advanced
+  assert.ok(rule(3, ['agentic-task', 'manga-task'])); // one basic, one advanced
   assert.equal(rule(3, ['manga-task', 'ml-research-advanced']), null); // both advanced
+  assert.equal(rule(3, ['agentic-task', 'manga-task', 'ml-research-advanced']), null); // 3 tasks with two advanced
+  assert.equal(rule(3, ['agentic-task', 'ml-research-basic', 'manga-task', 'ml-research-advanced']), null); // all 4 tasks
 });
 
 // ── Department submission validation ────────────────────────────────────────
@@ -1063,6 +1067,32 @@ test('ML tasks: distinct repository keys (agenticRepo, mangaRepo, paperRepo, fal
   assert.equal(sub.deptAnswers.ml.falsificationRepo, 'https://github.com/scholar/falsification-experiments');
   assert.notEqual(sub.deptAnswers.ml.paperRepo, sub.deptAnswers.ml.falsificationRepo);
   assert.deepEqual(validateDeptSubmission(sub), []);
+
+  // Selecting 3 tasks is completely valid when their fields are filled
+  sub.deptSelected.ml = ['agentic-task', 'manga-task', 'ml-research-basic'];
+  sub.deptAnswers.ml = {
+    // Agentic Task
+    agenticRepo: 'https://github.com/scholar/agentic-data-agent',
+    agenticCommits: true, fiveTools: true, readmeTools: true, toolUse: true, generalDatasets: true, notWrapper: true, techStack: 'LangChain', memoryToggle: false,
+    // Manga Task
+    mangaRepo: 'https://github.com/scholar/manga-translator-ocr',
+    predictions: Array.from({ length: 15 }, (_, i) => JSON.stringify({
+      sequence_id: i,
+      pages: [[{ speaker: 'A', text: '1' }], [{ speaker: 'B', text: '2' }], [{ speaker: 'C', text: '3' }]],
+    })).join('\n'),
+    weightsInRepo: true, readmeOwn: true, openWeight: true, noHostedApi: true, autoPredictions: true, citedExternal: true,
+    // Paper Craft
+    paperChoice: 'vit',
+    templateUrl: 'https://docs.google.com/document/d/paper-reading-template',
+    paperRepo: 'https://github.com/scholar/vit-notes',
+    paperCommits: true, readPaper: true,
+  };
+  assert.deepEqual(validateDeptSubmission(sub), []);
+
+  // Selecting only 1 task fails with minimum limit message
+  sub.deptSelected.ml = ['agentic-task'];
+  const singleTaskErrors = validateDeptSubmission(sub);
+  assert.ok(singleTaskErrors.some(e => e.includes('Select at least 2 tasks')));
 });
 
 

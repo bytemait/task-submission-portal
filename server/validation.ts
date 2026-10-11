@@ -206,8 +206,10 @@ export function validateDeptSubmission(data: Submission): string[] {
     }
 
     // Task picker validation
-    if (config.taskPicker && config.taskPickCount) {
-      if (selectedTasks.length !== config.taskPickCount) {
+    if (config.taskPicker) {
+      if (config.taskMinCount && selectedTasks.length < config.taskMinCount) {
+        errors.push(`${config.name}: Select at least ${config.taskMinCount} tasks.`);
+      } else if (config.taskPickCount && selectedTasks.length !== config.taskPickCount) {
         errors.push(`${config.name}: Select exactly ${config.taskPickCount} tasks.`);
       }
     }

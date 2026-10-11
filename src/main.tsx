@@ -200,7 +200,11 @@ function TaskPicker({ config, selected, onChange, year, error }: {
   };
   const yearErr = config.yearRule?.(year, selected);
   return <div className="task-picker">
-    <p className="task-picker-hint">Select exactly <strong>{config.taskPickCount}</strong> tasks. {year >= 2 && 'Year-based rules apply.'}</p>
+    <p className="task-picker-hint">
+      {config.taskMinCount
+        ? <>Select at least <strong>{config.taskMinCount}</strong> tasks. {year >= 2 && 'Year-based rules apply.'}</>
+        : <>Select exactly <strong>{config.taskPickCount}</strong> tasks. {year >= 2 && 'Year-based rules apply.'}</>}
+    </p>
     <div className="task-picker-grid">
       {config.tasks.map(task => <label key={task.id} className={'task-card ' + (selected.includes(task.id) ? 'selected' : '')}>
         <input type="checkbox" checked={selected.includes(task.id)} onChange={() => toggle(task.id)}/>
@@ -841,8 +845,13 @@ function Wizard() {
           }
         }
         // Task picker count
-        if (config.taskPicker && config.taskPickCount && selectedTasks.length !== config.taskPickCount) {
-          setError(`${config.name}: Select exactly ${config.taskPickCount} tasks.`); return;
+        if (config.taskPicker) {
+          if (config.taskMinCount && selectedTasks.length < config.taskMinCount) {
+            setError(`${config.name}: Select at least ${config.taskMinCount} tasks.`); return;
+          }
+          if (config.taskPickCount && selectedTasks.length !== config.taskPickCount) {
+            setError(`${config.name}: Select exactly ${config.taskPickCount} tasks.`); return;
+          }
         }
         // Year rule
         if (config.yearRule && yearNum > 0) {

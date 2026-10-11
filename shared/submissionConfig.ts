@@ -60,8 +60,10 @@ export interface DeptConfig {
   globalCheckboxes: { key: string; label: string; required?: boolean }[];
   /** Task definitions within this department */
   tasks: TaskConfig[];
-  /** How many tasks must be picked (for ML: exactly 2) */
+  /** Exact tasks that must be picked */
   taskPickCount?: number;
+  /** Minimum tasks that must be picked (for ML: at least 2, no max limit) */
+  taskMinCount?: number;
   /** Year-based rules for task selection */
   yearRule?: YearRule;
   /** If true, the student selects which tasks to attempt (ML). Otherwise tasks are shown inline. */
@@ -178,17 +180,17 @@ export function validateFieldUrl(url: string, urlType: DeptField['urlType']): st
 // ── ML Year Rules ───────────────────────────────────────────────────────────
 
 function mlYearRule(year: number, selectedTaskIds: string[]): string | null {
-  if (selectedTaskIds.length !== 2) return 'Select exactly 2 tasks.';
+  if (selectedTaskIds.length < 2) return 'Select at least 2 tasks.';
 
   const hasAdvanced = (id: string) =>
     id === 'manga-task' || id === 'ml-research-advanced';
   const advancedCount = selectedTaskIds.filter(hasAdvanced).length;
 
-  if (year === 1) return null; // any two
+  if (year === 1) return null; // any two or more
   if (year === 2 && advancedCount < 1)
     return '2nd year: at least one task must be Advanced.';
   if (year >= 3 && advancedCount < 2)
-    return '3rd year+: both tasks must be Advanced.';
+    return '3rd year+: at least two tasks must be Advanced.';
   return null;
 }
 
@@ -215,7 +217,7 @@ const mlDept: DeptConfig = {
   color: '#d3c8ff',
   type: 'github',
   taskPicker: true,
-  taskPickCount: 2,
+  taskMinCount: 2,
   yearRule: mlYearRule,
   globalFields: [],
   globalCheckboxes: [],
