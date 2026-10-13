@@ -215,14 +215,28 @@ app.put('/api/profile', (req, res) => {
 });
 
 app.post('/api/draft/recover', (req, res) => {
-  if (limited(req, 'recover', 12)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
+  if (limited(req, 'recover', 30)) { res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' }); return; }
   const { name, enrollment } = req.body || {};
   if (typeof name !== 'string' || typeof enrollment !== 'string' || name.trim().length < 2 || name.length > 100 || validateEnrollment(enrollment)) { res.status(400).json({ error: 'Enter your full name and a valid enrollment number.' }); return; }
-  const id = normalizeEnrollment(enrollment), row = getRow(id);
+  const id = normalizeEnrollment(enrollment);
+  let row = getRow(id);
   if (row && row.name_key !== cleanName(name)) { res.status(409).json({ error: 'An entry exists for that enrollment number. Check your details or contact BYTE.' }); return; }
-  if (row?.status === 'submitted') { res.status(409).json({ error: 'This enrollment number already has a final submission. Contact BYTE for changes.' }); return; }
+  let previouslySubmitted = false;
+  if (row?.status === 'submitted') {
+    if (!isSubmissionWindowOpen()) {
+      res.status(403).json({ error: 'The submission window has closed. Contact BYTE if you need assistance.' });
+      return;
+    }
+    previouslySubmitted = true;
+    const now = new Date().toISOString();
+    const submission: Submission = { ...JSON.parse(row.payload), status: 'draft', updatedAt: now };
+    delete submission.submittedAt;
+    db.prepare("UPDATE submissions SET payload=?,status='draft',updated_at=?,submitted_at=NULL WHERE enrollment=?")
+      .run(JSON.stringify(submission), now, id);
+    row = getRow(id);
+  }
   clear(req, res, 'draft'); setSession(res, 'draft', id);
-  if (row) { res.json({ found: true, submission: JSON.parse(row.payload) }); return; }
+  if (row) { res.json({ found: true, previouslySubmitted, submission: JSON.parse(row.payload) }); return; }
   const initial: Submission = {
     student: {
       name: name.trim(),
