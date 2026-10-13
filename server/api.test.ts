@@ -6,9 +6,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 
 async function freePort() { const socket = net.createServer(); await new Promise<void>(resolve => socket.listen(0, '127.0.0.1', resolve)); const address = socket.address(); const port = typeof address === 'object' && address ? address.port : 0; socket.close(); return port; }
-test('API: draft recovery, autosave, immutable submission and admin management', { timeout: 20000 }, async () => {
+test('API: draft recovery, autosave, submission updates and admin management', { timeout: 20000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'byte-test-'));
   const port = await freePort();
   const salt = randomBytes(16); const password = 'test-admin-password';
@@ -54,7 +55,21 @@ test('API: draft recovery, autosave, immutable submission and admin management',
     const recoveredCookie = recovered.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
     assert.equal((await call('/draft/submit', 'POST', {}, recoveredCookie)).response.status, 200);
     assert.equal((await call('/draft', 'PUT', draft, recoveredCookie)).response.status, 401);
-    assert.equal((await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678901' })).response.status, 409);
+
+    // Mismatched name still rejects recovery
+    assert.equal((await call('/draft/recover', 'POST', { name: 'Wrong Student', enrollment: '12345678901' })).response.status, 409);
+
+    // Students who have submitted can make changes by re-filling name and enrollment
+    const reedit = await call('/draft/recover', 'POST', { name: 'Test Student', enrollment: '12345678901' });
+    assert.equal(reedit.response.status, 200);
+    assert.equal(reedit.data.found, true);
+    assert.equal(reedit.data.previouslySubmitted, true);
+    assert.equal(reedit.data.submission.status, 'draft');
+    const reeditCookie = reedit.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
+    reedit.data.submission.student.email = 'updated-student@example.com';
+    assert.equal((await call('/draft', 'PUT', reedit.data.submission, reeditCookie)).response.status, 200);
+    assert.equal((await call('/draft/submit', 'POST', {}, reeditCookie)).response.status, 200);
+
     assert.equal((await call('/admin/login', 'POST', { password: 'wrong' })).response.status, 401);
     const login = await call('/admin/login', 'POST', { password });
     assert.equal(login.response.status, 200);
@@ -62,6 +77,7 @@ test('API: draft recovery, autosave, immutable submission and admin management',
     const listing = await call('/admin/submissions', 'GET', undefined, adminCookie);
     assert.equal(listing.data.length, 1);
     assert.equal(listing.data[0].status, 'submitted');
+    assert.equal(listing.data[0].student.email, 'updated-student@example.com');
 
 
     // Test unauthenticated export
@@ -73,7 +89,7 @@ test('API: draft recovery, autosave, immutable submission and admin management',
     assert.equal(csvExport.status, 200);
     assert.ok(csvExport.headers.get('content-type')?.includes('text/csv'));
     const csvText = await csvExport.text();
-    assert.ok(csvText.includes('12345678901,Test Student,test@example.com'));
+    assert.ok(csvText.includes('12345678901,Test Student,updated-student@example.com'));
     assert.ok(csvText.includes('https://drive.google.com/file/d/abc123'));
 
     // Test authenticated JSON export
@@ -83,6 +99,7 @@ test('API: draft recovery, autosave, immutable submission and admin management',
     const jsonData = await jsonExport.json() as any[];
     assert.equal(jsonData.length, 1);
     assert.equal(jsonData[0].student.enrollment, '12345678901');
+    assert.equal(jsonData[0].student.email, 'updated-student@example.com');
 
     const exportRes = await fetch(base + '/admin/export.csv', { headers: { cookie: adminCookie } });
     assert.equal(exportRes.status, 200);
@@ -196,4 +213,48 @@ test('API: draft recovery, autosave, immutable submission and admin management',
     await call('/admin/logout', 'POST', {}, adminCookie);
     assert.equal((await call('/admin/submissions', 'GET', undefined, adminCookie)).response.status, 401);
   } finally { process.kill(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('API: closed submission window blocks editing already submitted applications', { timeout: 15000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'byte-closed-test-'));
+  const dbPath = join(dir, 'test.sqlite');
+  const setupDb = new DatabaseSync(dbPath);
+  setupDb.exec('CREATE TABLE submissions (enrollment TEXT PRIMARY KEY, name_key TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, submitted_at TEXT, profile_completed_at TEXT);');
+  const now = new Date().toISOString();
+  setupDb.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,?,?)').run('11111111111', 'closed student', JSON.stringify({ student: { name: 'Closed Student', enrollment: '11111111111' }, status: 'submitted' }), 'submitted', now, now, now);
+  setupDb.close();
+
+  const port = await freePort();
+  const process = spawn('node', ['--import', 'tsx', 'server/index.ts'], {
+    env: {
+      ...globalThis.process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      SUBMISSION_OPENS_AT: '2020-01-01T00:00:00Z',
+      SUBMISSION_CLOSES_AT: '2020-01-02T00:00:00Z',
+    },
+    stdio: 'ignore',
+  });
+  const base = `http://127.0.0.1:${port}/api`;
+  async function call(path: string, method = 'GET', body?: unknown) {
+    const response = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { response, data: await response.json() as any };
+  }
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try { await call('/tracks'); ready = true; break; } catch { await new Promise(r => setTimeout(r, 100)); }
+    }
+    assert.ok(ready, 'server started');
+    const recoverRes = await call('/draft/recover', 'POST', { name: 'Closed Student', enrollment: '11111111111' });
+    assert.equal(recoverRes.response.status, 403);
+    assert.ok(recoverRes.data.error.includes('submission window has closed'));
+  } finally {
+    process.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

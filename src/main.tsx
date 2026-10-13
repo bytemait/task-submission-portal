@@ -534,6 +534,7 @@ function Wizard() {
   const [active, setActive] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [found, setFound] = useState(false);
+  const [previouslySubmitted, setPreviouslySubmitted] = useState(false);
   const [saveState, setSaveState] = useState('Your progress is saved as you go');
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
@@ -689,6 +690,30 @@ function Wizard() {
     version.current++; setError(''); setDirty(true);
   }
 
+  async function recover() {
+    const s = latest.current.student;
+    if (active || recovering || s.name.trim().length < 2) return false;
+    const enrollmentError = validateEnrollment(s.enrollment);
+    if (enrollmentError) {
+      setProfileErrors(prev => ({ ...prev, enrollment: enrollmentError }));
+      setError(enrollmentError);
+      return false;
+    }
+    setRecovering(true); setError('');
+    try {
+      const result = await post<{ found: boolean; previouslySubmitted?: boolean; submission: Submission }>('/draft/recover', { name: s.name, enrollment: s.enrollment });
+      const restored = normalizeLoadedSubmission(result.found ? result.submission : { ...result.submission, student: { ...s, name: result.submission.student.name, enrollment: result.submission.student.enrollment } });
+      setData(restored); latest.current = restored; version.current = result.found ? 0 : 1; saved.current = 0;
+      setFound(result.found);
+      setPreviouslySubmitted(!!result.previouslySubmitted);
+      setActive(true);
+      setSaveState(result.previouslySubmitted ? 'Previous submission recovered · you can make changes' : (result.found ? 'Existing draft recovered' : 'Draft started · autosave is on'));
+      checkProfileCompletion(restored.student);
+      return true;
+    } catch (e) { setError((e as Error).message); return false; }
+    finally { setRecovering(false); }
+  }
+
   const handleProfileBlur = useCallback((field: string) => {
     const s = latest.current.student;
     let err: string | null = null;
@@ -708,41 +733,28 @@ function Wizard() {
       if (err) next[field] = err; else delete next[field];
       return next;
     });
-  }, []);
-  async function recover() {
-    if (active || recovering || data.student.name.trim().length < 2) return false;
-    const enrollmentError = validateEnrollment(data.student.enrollment);
-    if (enrollmentError) {
-      setProfileErrors(prev => ({ ...prev, enrollment: enrollmentError }));
-      setError(enrollmentError);
-      return false;
+
+    if ((field === 'enrollment' || field === 'name') && !active && !recovering) {
+      if (s.name.trim().length >= 2 && !validateEnrollment(s.enrollment)) {
+        recover();
+      }
     }
-    setRecovering(true); setError('');
-    try {
-      const result = await post<{ found: boolean; submission: Submission }>('/draft/recover', { name: data.student.name, enrollment: data.student.enrollment });
-      const restored = normalizeLoadedSubmission(result.found ? result.submission : { ...result.submission, student: { ...data.student, name: result.submission.student.name, enrollment: result.submission.student.enrollment } });
-      setData(restored); latest.current = restored; version.current = result.found ? 0 : 1; saved.current = 0;
-      setFound(result.found); setActive(true);
-      setSaveState(result.found ? 'Existing draft recovered' : 'Draft started · autosave is on');
-      checkProfileCompletion(restored.student);
-      return true;
-    } catch (e) { setError((e as Error).message); return false; }
-    finally { setRecovering(false); }
-  }
+  }, [active, recovering]);
   async function switchUser() {
     try { await post('/draft/logout'); } catch {}
     if (data.student.enrollment) clearDraftLocal(data.student.enrollment);
     const fresh = emptySubmission();
     setData(fresh); latest.current = fresh;
-    setActive(false); setFound(false); setStep(0);
+    setActive(false); setFound(false); setPreviouslySubmitted(false); setStep(0);
     setProfileComplete(false); setProfileErrors({});
     setSaveState('Enter your details to begin');
     version.current = 0; saved.current = 0;
   }
 
-  async function saveProfile(): Promise<boolean> {
+  async function saveProfile(targetStudent?: Student): Promise<boolean> {
+    const s = targetStudent || latest.current.student;
     // Validate all fields
-    const errs = checkProfileCompletion(data.student);
+    const errs = checkProfileCompletion(s);
     setProfileErrors(errs);
     if (Object.keys(errs).length > 0) {
       // Focus first error field
@@ -756,7 +768,7 @@ function Wizard() {
     try {
       setSaveState('Saving profile…');
       // Send only recognized profile fields (exclude legacy fields like dept, otherSocieties, socials)
-      const { name, enrollment, email, phone, academicBranch, year, semester, inOtherSocieties, societies, instagram, twitter, discord } = data.student;
+      const { name, enrollment, email, phone, academicBranch, year, semester, inOtherSocieties, societies, instagram, twitter, discord } = s;
       const result = await put<{ updatedAt: string; profileComplete: boolean; errors?: ProfileErrors }>('/profile', {
         profile: { name, enrollment, email, phone, academicBranch, year, semester, inOtherSocieties, societies, instagram, twitter, discord },
       });
@@ -780,14 +792,18 @@ function Wizard() {
     setError('');
     if (step === 0) {
       // Validate Step 1
-      if (!data.student.name.trim() || !data.student.enrollment.trim()) {
+      const s = latest.current.student;
+      if (!s.name.trim() || !s.enrollment.trim()) {
         setError('Enter your name and enrollment number first.');
         return;
       }
-      if (!active && !(await recover())) return;
+      if (!active) {
+        const ok = await recover();
+        if (!ok) return;
+      }
 
       // Now validate all profile fields
-      const ok = await saveProfile();
+      const ok = await saveProfile(latest.current.student);
       if (!ok) return;
     }
     if (step === 1 && !data.selected.length) { setError('Choose at least one department to continue.'); return; }
@@ -954,7 +970,7 @@ function Wizard() {
     </section></main></Shell>;
   }
 
-  if (done) return <Shell><main className="success"><div className="success-icon"><Check size={40}/></div><p className="eyebrow">SUBMISSION RECEIVED</p><h1>That's a wrap.<br/><em>Nice work.</em></h1><p>Your work is with the BYTE team now. We'll reach out at <strong>{data.student.email}</strong> if we need anything else.</p><a href="https://bytesoc.dev/" className="button primary">Back to BYTE <ArrowUpRight size={17}/></a></main></Shell>;
+  if (done) return <Shell><main className="success"><div className="success-icon"><Check size={40}/></div><p className="eyebrow">SUBMISSION RECEIVED</p><h1>That's a wrap.<br/><em>Nice work.</em></h1><p>Your work is with the BYTE team now. We'll reach out at <strong>{data.student.email}</strong> if we need anything else.</p><div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '20px', flexWrap: 'wrap' }}><a href="https://bytesoc.dev/" className="button primary">Back to BYTE <ArrowUpRight size={17}/></a><button type="button" className="button secondary" onClick={() => { setDone(false); setActive(false); setFound(false); setPreviouslySubmitted(false); setStep(0); setData(emptySubmission()); latest.current = emptySubmission(); setSaveState('Enter your details to make changes'); }}>Make changes <Pencil size={16}/></button></div></main></Shell>;
 
   const windowOpen = isWindowOpen();
 
@@ -962,7 +978,7 @@ function Wizard() {
   {!windowOpen && <div className="notice window-notice"><LockKeyhole size={19}/><span>Submissions open on <strong>29 September 2025, 12:01 AM IST</strong>.{WINDOW_CLOSE ? ` Closing: ${new Date(WINDOW_CLOSE).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''} You can preview the form but cannot submit yet.</span></div>}
 
   {step === 0 && <>
-    {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> We found your draft and picked up where you left off.</div>}
+    {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> {previouslySubmitted ? 'We found your previous submission and picked up where you left off. You can update your answers and submit again.' : 'We found your draft and picked up where you left off.'}</div>}
     <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active} onSwitchUser={switchUser}/>
   </>}
 
@@ -1012,10 +1028,10 @@ function Wizard() {
         </div>;
       });
     })()}
-    {data.selected.length > 0 && <div className="notice" style={{marginTop:24}}><Pencil size={19}/><span>You can save and edit your draft until you make your final submission.</span></div>}
+    {data.selected.length > 0 && <div className="notice" style={{marginTop:24}}><Pencil size={19}/><span>Your answers save automatically as you make changes.</span></div>}
   </>}
 
-  {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">Take a moment to review everything. Once submitted, your application can't be edited.</p>
+  {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">Take a moment to review everything. You can make changes anytime before the submission window closes by re-entering your name and enrollment number.</p>
     <div className="review-block"><div className="review-head"><span>APPLICANT PROFILE</span><button onClick={() => setStep(0)}>Edit <ArrowUpRight size={14}/></button></div>
       <h2>{data.student.name}</h2>
       <p>{data.student.enrollment} · {data.student.academicBranch || '—'} · Semester {data.student.semester || '—'}</p>
@@ -1079,7 +1095,7 @@ function Wizard() {
   {error && <p role="alert" className="error-banner">{error}</p>}
   <div className="form-actions">
     {step > 0 ? <button className="button back" onClick={() => { setStep(step - 1); setError(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><ArrowLeft size={17}/> Back</button> : <span className="action-note"><LockKeyhole size={15}/> Your details stay with BYTE</span>}
-    {step === 3 ? <button className="button primary" disabled={sending || !windowOpen} onClick={submit}>{sending ? 'Submitting…' : 'Submit application'} <ArrowRight size={17}/></button> : <button className="button primary" disabled={recovering || (!windowOpen && step > 0)} onClick={next}>{recovering ? 'Finding your draft…' : 'Continue'} <ArrowRight size={17}/></button>}
+    {step === 3 ? <button className="button primary" disabled={sending || !windowOpen} onClick={submit}>{sending ? 'Submitting…' : (previouslySubmitted ? 'Update submission' : 'Submit application')} <ArrowRight size={17}/></button> : <button className="button primary" disabled={recovering || (!windowOpen && step > 0)} onClick={next}>{recovering ? 'Finding your draft…' : 'Continue'} <ArrowRight size={17}/></button>}
   </div>
   </div></section></main></Shell>;
 }
