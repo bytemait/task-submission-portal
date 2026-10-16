@@ -264,7 +264,7 @@ app.post('/api/draft/recover', (req, res) => {
 
   // Row does not exist -> attempting to start a new form
   if (!canCreateNewForm()) {
-    res.status(403).json({ error: 'You missed it. Better luck next year. New applications closed on 16 October at 11:59 PM.' });
+    res.status(403).json({ error: 'You missed it. Better luck next year. Applications closed on 17 October at 1:00 AM.' });
     return;
   }
 
