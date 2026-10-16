@@ -1081,7 +1081,7 @@ function Wizard() {
               <div className="section-icon">RECRUITMENT 2026</div>
               <h1>You missed it.<br/><em>Better luck next year.</em></h1>
               <p className="lead">
-                Filling of new forms closed on <strong>16 October at 11:59 PM IST</strong>. We are no longer accepting new registrations for recruitment 2026.
+                Filling of new forms closed on <strong>17 October at 1:00 AM IST</strong>. We are no longer accepting new registrations for recruitment 2026.
               </p>
 
               <div style={{
@@ -1099,7 +1099,7 @@ function Wizard() {
                   Resume your saved application
                 </h3>
                 <p className="hint" style={{ marginBottom: '22px' }}>
-                  If you started an application before 11:59 PM on 16th October, your draft is preserved. Enter your details below to continue where you left off.
+                  If you started an application before 1:00 AM on 17th October, your draft is preserved. Enter your details below to continue where you left off.
                   {windowOpen
                     ? ' Submissions close on 17 October at 1:00 AM IST.'
                     : ' Note: Submissions closed on 17 October at 1:00 AM IST. Drafts remain viewable.'}
@@ -1167,7 +1167,7 @@ function Wizard() {
       return (
         <div className="notice" style={{ marginBottom: 30 }}>
           <Pencil size={19}/>
-          <span>New applications closed on 16 October at 11:59 PM IST. You are editing your existing saved draft. Submissions close on <strong>17 October at 1:00 AM IST</strong>.</span>
+          <span>New applications closed on 17 October at 1:00 AM IST. You are editing your existing saved draft. Submissions close on <strong>17 October at 1:00 AM IST</strong>.</span>
         </div>
       );
     }
