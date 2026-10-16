@@ -14,19 +14,36 @@ import {
   deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted, getEffectiveTaskTag,
   validateFieldUrl, validateMangaJsonl, countWords, validateWordLimit,
   formatCheckboxLabel, buildFilenameHint,
+  DEFAULT_SUBMISSION_OPENS, DEFAULT_NEW_FORMS_CLOSE, DEFAULT_SUBMISSION_CLOSE,
   type DeptConfig, type TaskConfig, type DeptField,
 } from '../shared/submissionConfig.ts';
 import './style.css';
 
-// ── Submission window ───────────────────────────────────────────────────────
-const WINDOW_OPEN = new Date('2025-09-29T00:01:00+05:30');
-const WINDOW_CLOSE_STR = (import.meta as any).env?.VITE_SUBMISSION_CLOSE || '';
+// ── Submission window & deadlines ───────────────────────────────────────────
+const WINDOW_OPEN_STR = (import.meta as any).env?.VITE_SUBMISSION_OPEN || DEFAULT_SUBMISSION_OPENS;
+const WINDOW_OPEN = new Date(WINDOW_OPEN_STR);
+
+const NEW_FORMS_CLOSE_STR = (import.meta as any).env?.VITE_NEW_FORMS_CLOSE !== undefined
+  ? (import.meta as any).env.VITE_NEW_FORMS_CLOSE
+  : DEFAULT_NEW_FORMS_CLOSE;
+const NEW_FORMS_CLOSE = NEW_FORMS_CLOSE_STR ? new Date(NEW_FORMS_CLOSE_STR) : null;
+
+const WINDOW_CLOSE_STR = (import.meta as any).env?.VITE_SUBMISSION_CLOSE !== undefined
+  ? (import.meta as any).env.VITE_SUBMISSION_CLOSE
+  : DEFAULT_SUBMISSION_CLOSE;
 const WINDOW_CLOSE = WINDOW_CLOSE_STR ? new Date(WINDOW_CLOSE_STR) : null;
 
 function isWindowOpen(): boolean {
   const now = Date.now();
   if (now < WINDOW_OPEN.getTime()) return false;
   if (WINDOW_CLOSE && now > WINDOW_CLOSE.getTime()) return false;
+  return true;
+}
+
+function canCreateNewForm(): boolean {
+  const now = Date.now();
+  if (now < WINDOW_OPEN.getTime()) return false;
+  if (NEW_FORMS_CLOSE && now > NEW_FORMS_CLOSE.getTime()) return false;
   return true;
 }
 
@@ -394,19 +411,20 @@ function DeptForm({ config, answers, selectedTasks, onAnswer, onSelectTasks, yea
 // ── Shared components ───────────────────────────────────────────────────────
 function Brand() { return <a className="brand" href="/" aria-label="BYTE home"><span className="brand-mark">B<span>.</span></span><span className="brand-type">BYTE<span className="brand-sub">MAIT TECH SOCIETY</span></span></a>; }
 function Shell({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) { return <div className="app"><header className="topbar"><Brand/><div className="topbar-right"><span className="top-label">RECRUITMENT / 2026</span><a className="top-link" href={admin ? '/' : '/login'}>{admin ? 'Submit a task' : 'Admin access'} <ArrowUpRight size={15}/></a></div></header>{children}<footer className="footer"><span>© 2026 BYTE MAIT</span><span>Made for the next generation of builders.</span><a href="https://bytesoc.dev/tasks/" target="_blank" rel="noreferrer">Explore tasks <ArrowUpRight size={13}/></a></footer></div>; }
-function FieldInput({ id, label, value, onChange, type = 'text', hint, required, onBlur, disabled, error, autoComplete, inputMode, ariaDescribedBy, maxLength }: {
-  id: string; label: string; value: string; onChange: (v: string) => void; type?: string; hint?: string; required?: boolean; onBlur?: () => void; disabled?: boolean; error?: string; autoComplete?: string; inputMode?: string; ariaDescribedBy?: string; maxLength?: number;
+function FieldInput({ id, label, value, onChange, type = 'text', hint, required, onBlur, disabled, error, autoComplete, inputMode, ariaDescribedBy, maxLength, placeholder }: {
+  id: string; label: string; value: string; onChange: (v: string) => void; type?: string; hint?: string; required?: boolean; onBlur?: () => void; disabled?: boolean; error?: string; autoComplete?: string; inputMode?: string; ariaDescribedBy?: string; maxLength?: number; placeholder?: string;
 }) {
   const errorId = id + '-error';
   const hintId = id + '-hint';
   const describedBy = [error ? errorId : '', hint ? hintId : '', ariaDescribedBy || ''].filter(Boolean).join(' ') || undefined;
+  const defaultPlaceholder = type === 'url' ? 'https://...' : label === 'Full name' ? 'Your name, as on college records' : label === 'Enrollment number' ? 'e.g. 12345678901' : '';
   return <div className={'form-field' + (error ? ' has-error' : '')}>
     <label htmlFor={id}>{label}{required && <span className="required"> *</span>}{!required && <span className="optional"> (optional)</span>}</label>
-    {type === 'textarea' ? <textarea id={id} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} placeholder="A little context goes a long way..." rows={3} aria-describedby={describedBy} aria-invalid={!!error}/> :
+    {type === 'textarea' ? <textarea id={id} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} placeholder={placeholder || "A little context goes a long way..."} rows={3} aria-describedby={describedBy} aria-invalid={!!error}/> :
     <input id={id} type={type} value={value} onChange={e => onChange(e.target.value)} onBlur={onBlur} disabled={disabled}
       autoComplete={autoComplete} inputMode={inputMode as any} maxLength={maxLength}
       aria-describedby={describedBy} aria-invalid={!!error}
-      placeholder={type === 'url' ? 'https://...' : label === 'Full name' ? 'Your name, as on college records' : label === 'Enrollment number' ? 'e.g. 12345678901' : ''}/>}
+      placeholder={placeholder ?? defaultPlaceholder}/>}
     {hint && <p className="hint" id={hintId}>{hint}</p>}
     {error && <p className="field-error" id={errorId} role="alert">{error}</p>}
   </div>;
@@ -440,11 +458,11 @@ function SocietyList({ items, onChange, error }: { items: string[]; onChange: (v
 }
 
 // ── Step 1: Applicant Details ───────────────────────────────────────────────
-function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disabled, onSwitchUser }: {
+function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disabled, onSwitchUser, canStartFresh = true }: {
   data: Student; onChange: (key: keyof Student, value: any) => void;
   onBatchChange: (updates: Partial<Student>) => void;
   errors: ProfileErrors; onBlur: (key: string) => void; disabled?: boolean;
-  onSwitchUser?: () => void;
+  onSwitchUser?: () => void; canStartFresh?: boolean;
 }) {
   const handleSemesterChange = (semester: string) => {
     onBatchChange({ semester, year: yearForSemester(semester) });
@@ -465,7 +483,7 @@ function ApplicantDetails({ data, onChange, onBatchChange, errors, onBlur, disab
         error={errors.enrollment} hint={disabled ? 'Locked to your active draft session.' : 'Your college enrollment/class roll no'}/>
 
       {disabled && onSwitchUser && <div className="switch-user-row">
-        <button type="button" className="link-btn" onClick={onSwitchUser}>Not you? Start fresh</button>
+        <button type="button" className="link-btn" onClick={onSwitchUser}>{canStartFresh ? 'Not you? Start fresh' : 'Switch applicant'}</button>
       </div>}
 
       <FieldInput id="email" label="Email address" type="email" required value={data.email}
@@ -543,6 +561,16 @@ function Wizard() {
   const [profileComplete, setProfileComplete] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [windowConfig, setWindowConfig] = useState<{
+    opens: string;
+    newFormsClose: string | null;
+    closes: string | null;
+    canCreateNewForm: boolean;
+    isOpen: boolean;
+  } | null>(null);
+  const [resumeName, setResumeName] = useState('');
+  const [resumeEnrollment, setResumeEnrollment] = useState('');
+  const [resumeError, setResumeError] = useState('');
   const version = useRef(0);
   const saved = useRef(0);
   const latest = useRef(data);
@@ -577,6 +605,16 @@ function Wizard() {
 
   // Restore from session/server on mount
   useEffect(() => {
+    api<{
+      opens: string;
+      newFormsClose: string | null;
+      closes: string | null;
+      canCreateNewForm: boolean;
+      isOpen: boolean;
+    }>('/config/window')
+      .then(setWindowConfig)
+      .catch(() => {});
+
     api<Submission>('/draft').then(d => {
       const normalized = normalizeLoadedSubmission(d);
       setData(normalized);
@@ -595,11 +633,26 @@ function Wizard() {
             if (raw) {
               const local = JSON.parse(raw) as Submission;
               if (local?.student?.name && local?.student?.enrollment) {
-                const normalized = normalizeLoadedSubmission(local);
-                setData(normalized);
-                latest.current = normalized;
-                checkProfileCompletion(normalized.student);
-                setSaveState('Local draft loaded');
+                setResumeName(local.student.name);
+                setResumeEnrollment(local.student.enrollment);
+                post<{ found: boolean; previouslySubmitted?: boolean; submission: Submission }>('/draft/recover', {
+                  name: local.student.name,
+                  enrollment: local.student.enrollment,
+                }).then(result => {
+                  const restored = normalizeLoadedSubmission(result.found ? result.submission : local);
+                  setData(restored);
+                  latest.current = restored;
+                  setActive(true);
+                  setFound(result.found);
+                  setPreviouslySubmitted(!!result.previouslySubmitted);
+                  setSaveState(result.previouslySubmitted ? 'Previous submission recovered · you can make changes' : 'Existing draft recovered');
+                  checkProfileCompletion(restored.student);
+                }).catch(() => {
+                  const normalized = normalizeLoadedSubmission(local);
+                  setData(normalized);
+                  latest.current = normalized;
+                  setSaveState('Local draft loaded');
+                });
                 break;
               }
             }
@@ -748,7 +801,50 @@ function Wizard() {
     setActive(false); setFound(false); setPreviouslySubmitted(false); setStep(0);
     setProfileComplete(false); setProfileErrors({});
     setSaveState('Enter your details to begin');
+    setResumeName(''); setResumeEnrollment(''); setResumeError('');
     version.current = 0; saved.current = 0;
+  }
+
+  async function handleResumeFromClosed(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (recovering) return;
+    const name = resumeName.trim();
+    const enrollment = resumeEnrollment.trim();
+    if (!name || name.length < 2) {
+      setResumeError('Enter your full name.');
+      return;
+    }
+    const enrollErr = validateEnrollment(enrollment);
+    if (enrollErr) {
+      setResumeError(enrollErr);
+      return;
+    }
+    setRecovering(true);
+    setResumeError('');
+    try {
+      const result = await post<{ found: boolean; previouslySubmitted?: boolean; submission: Submission }>('/draft/recover', {
+        name,
+        enrollment,
+      });
+      if (!result.found) {
+        setResumeError('You missed it. Better luck next year. No existing draft found for this enrollment number.');
+        return;
+      }
+      const restored = normalizeLoadedSubmission(result.submission);
+      setData(restored);
+      latest.current = restored;
+      version.current = 0;
+      saved.current = 0;
+      setFound(true);
+      setPreviouslySubmitted(!!result.previouslySubmitted);
+      setActive(true);
+      setSaveState(result.previouslySubmitted ? 'Previous submission recovered · you can make changes' : 'Existing draft recovered');
+      checkProfileCompletion(restored.student);
+    } catch (e: any) {
+      setResumeError(e.message || 'You missed it. Better luck next year.');
+    } finally {
+      setRecovering(false);
+    }
   }
 
   async function saveProfile(targetStudent?: Student): Promise<boolean> {
@@ -970,16 +1066,117 @@ function Wizard() {
     </section></main></Shell>;
   }
 
-  if (done) return <Shell><main className="success"><div className="success-icon"><Check size={40}/></div><p className="eyebrow">SUBMISSION RECEIVED</p><h1>That's a wrap.<br/><em>Nice work.</em></h1><p>Your work is with the BYTE team now. We'll reach out at <strong>{data.student.email}</strong> if we need anything else.</p><div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '20px', flexWrap: 'wrap' }}><a href="https://bytesoc.dev/" className="button primary">Back to BYTE <ArrowUpRight size={17}/></a><button type="button" className="button secondary" onClick={() => { setDone(false); setActive(false); setFound(false); setPreviouslySubmitted(false); setStep(0); setData(emptySubmission()); latest.current = emptySubmission(); setSaveState('Enter your details to make changes'); }}>Make changes <Pencil size={16}/></button></div></main></Shell>;
+  const newFormsAllowed = windowConfig !== null ? windowConfig.canCreateNewForm : canCreateNewForm();
+  const windowOpen = windowConfig !== null ? windowConfig.isOpen : isWindowOpen();
 
-  const windowOpen = isWindowOpen();
+  if (done) return <Shell><main className="success"><div className="success-icon"><Check size={40}/></div><p className="eyebrow">SUBMISSION RECEIVED</p><h1>That's a wrap.<br/><em>Nice work.</em></h1><p>Your work is with the BYTE team now. We'll reach out at <strong>{data.student.email}</strong> if we need anything else.</p><div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '20px', flexWrap: 'wrap' }}><a href="https://bytesoc.dev/" className="button primary">Back to BYTE <ArrowUpRight size={17}/></a>{windowOpen && <button type="button" className="button secondary" onClick={() => { setDone(false); setActive(false); setFound(false); setPreviouslySubmitted(false); setStep(0); setData(emptySubmission()); latest.current = emptySubmission(); setSaveState('Enter your details to make changes'); }}>Make changes <Pencil size={16}/></button>}</div></main></Shell>;
+
+  // Closed screen for visitors without an active draft session when new forms are closed
+  if (!active && !newFormsAllowed) {
+    return (
+      <Shell>
+        <main className="wizard-layout">
+          <section className="workspace" style={{ gridColumn: '1/-1' }}>
+            <div className="workspace-body" style={{ maxWidth: 640, margin: '60px auto', textAlign: 'center' }}>
+              <div className="section-icon">RECRUITMENT 2026</div>
+              <h1>You missed it.<br/><em>Better luck next year.</em></h1>
+              <p className="lead">
+                Filling of new forms closed on <strong>16 October at 12:59 PM IST</strong>. We are no longer accepting new registrations for recruitment 2026.
+              </p>
+
+              <div style={{
+                marginTop: '40px',
+                padding: '32px',
+                background: '#12261a',
+                border: '1px solid #2a4b31',
+                borderRadius: '6px',
+                textAlign: 'left'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#baf263', fontSize: '11px', fontWeight: 700, letterSpacing: '1.8px' }}>
+                  <LockKeyhole size={14}/> ALREADY HAVE A DRAFT?
+                </div>
+                <h3 style={{ margin: '0 0 8px', fontSize: '19px', fontFamily: "'Space Grotesk', sans-serif", color: '#e8eee7' }}>
+                  Resume your saved application
+                </h3>
+                <p className="hint" style={{ marginBottom: '22px' }}>
+                  If you started an application before 12:59 PM on 16th October, your draft is preserved. Enter your details below to continue where you left off.
+                  {windowOpen
+                    ? ' Submissions close on 17 October at 1:00 AM IST.'
+                    : ' Note: Submissions closed on 17 October at 1:00 AM IST. Drafts remain viewable.'}
+                </p>
+
+                <form onSubmit={handleResumeFromClosed} style={{ display: 'grid', gap: '18px' }}>
+                  <FieldInput
+                    id="resumeName"
+                    label="Full name"
+                    required
+                    value={resumeName}
+                    onChange={v => { setResumeName(v); setResumeError(''); }}
+                    placeholder="Enter your full name"
+                    autoComplete="name"
+                  />
+                  <FieldInput
+                    id="resumeEnrollment"
+                    label="Enrollment number"
+                    required
+                    value={resumeEnrollment}
+                    onChange={v => { setResumeEnrollment(v); setResumeError(''); }}
+                    placeholder="Enter your college enrollment / roll no"
+                    maxLength={ENROLLMENT_MAX_LENGTH}
+                  />
+                  {resumeError && <p className="error-banner" role="alert" style={{ margin: 0 }}>{resumeError}</p>}
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={recovering || !resumeName.trim() || !resumeEnrollment.trim()}
+                    style={{ justifySelf: 'start', marginTop: '6px' }}
+                  >
+                    {recovering ? 'Finding your draft…' : 'Resume draft'} <ArrowRight size={17}/>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </section>
+        </main>
+      </Shell>
+    );
+  }
 
   return <Shell><main className="wizard-layout"><aside className="sidebar"><div className="sidebar-inner"><p className="eyebrow">YOUR APPLICATION <span className="eyebrow-rule"/></p><h2>Show us what<br/><em>you can do.</em></h2><p className="sidebar-copy">A few details, the tracks you love, and the work you're proud of. That's all it takes.</p><nav className="step-list" aria-label="Form steps">{allStepLabels.map((s, i) => <div key={s} className={'step-item ' + (step === i ? 'current' : '') + (step > i ? ' completed' : '') + (i > 0 && !profileComplete ? ' locked' : '')}><span className="step-index">{step > i ? <Check size={15}/> : String(i + 1).padStart(2, '0')}</span><span>{s}</span>{step === i && <span className="step-dot"/>}</div>)}</nav><div className="sidebar-bottom"><Sparkles size={18}/><p>"The best way to learn is to build something real."</p></div></div></aside><section className="workspace"><div className="workspace-top"><span className="eyebrow">STEP {String(step + 1).padStart(2, '0')} / 04</span><span className="save-indicator"><span className="save-pulse"/> {saveState}</span></div><div className="workspace-body">
-  {!windowOpen && <div className="notice window-notice"><LockKeyhole size={19}/><span>Submissions open on <strong>29 September 2025, 12:01 AM IST</strong>.{WINDOW_CLOSE ? ` Closing: ${new Date(WINDOW_CLOSE).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''} You can preview the form but cannot submit yet.</span></div>}
+  {(() => {
+    const now = Date.now();
+    const openTime = WINDOW_OPEN.getTime();
+    const closeTime = (WINDOW_CLOSE || new Date(DEFAULT_SUBMISSION_CLOSE)).getTime();
+    if (now < openTime) {
+      return (
+        <div className="notice window-notice">
+          <LockKeyhole size={19}/>
+          <span>Submissions open on <strong>29 September 2025, 12:01 AM IST</strong>. You can preview the form but cannot submit yet.</span>
+        </div>
+      );
+    }
+    if (!windowOpen || now > closeTime) {
+      return (
+        <div className="notice window-notice">
+          <LockKeyhole size={19}/>
+          <span>Submissions closed on <strong>17 October 2026, 1:00 AM IST</strong>. Your draft is preserved, but applications can no longer be submitted.</span>
+        </div>
+      );
+    }
+    if (!newFormsAllowed) {
+      return (
+        <div className="notice" style={{ marginBottom: 30 }}>
+          <Pencil size={19}/>
+          <span>New applications closed on 16 October at 12:59 PM IST. You are editing your existing saved draft. Submissions close on <strong>17 October at 1:00 AM IST</strong>.</span>
+        </div>
+      );
+    }
+    return null;
+  })()}
 
   {step === 0 && <>
     {found && <div className="notice recovered" role="status"><CheckCircle2 size={19}/> {previouslySubmitted ? 'We found your previous submission and picked up where you left off. You can update your answers and submit again.' : 'We found your draft and picked up where you left off.'}</div>}
-    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active} onSwitchUser={switchUser}/>
+    <ApplicantDetails data={data.student} onChange={student} onBatchChange={studentBatch} errors={profileErrors} onBlur={handleProfileBlur} disabled={active} onSwitchUser={switchUser} canStartFresh={newFormsAllowed}/>
   </>}
 
   {step === 1 && <><div className="section-icon">02 — FIND YOUR THING</div><h1>Choose your <em>departments.</em></h1><p className="lead">Pick one or go for a few. There's no limit to where curiosity can take you.</p>
@@ -1031,7 +1228,7 @@ function Wizard() {
     {data.selected.length > 0 && <div className="notice" style={{marginTop:24}}><Pencil size={19}/><span>Your answers save automatically as you make changes.</span></div>}
   </>}
 
-  {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">Take a moment to review everything. You can make changes anytime before the submission window closes by re-entering your name and enrollment number.</p>
+  {step === 3 && <><div className="section-icon">04 — ONE LAST LOOK</div><h1>Ready to <em>send it?</em></h1><p className="lead">{windowOpen ? 'Take a moment to review everything. You can make changes anytime before the submission window closes by re-entering your name and enrollment number.' : 'Submissions closed on 17 October at 1:00 AM IST. Your draft answers are preserved, but applications can no longer be submitted.'}</p>
     <div className="review-block"><div className="review-head"><span>APPLICANT PROFILE</span><button onClick={() => setStep(0)}>Edit <ArrowUpRight size={14}/></button></div>
       <h2>{data.student.name}</h2>
       <p>{data.student.enrollment} · {data.student.academicBranch || '—'} · Semester {data.student.semester || '—'}</p>
@@ -1095,7 +1292,19 @@ function Wizard() {
   {error && <p role="alert" className="error-banner">{error}</p>}
   <div className="form-actions">
     {step > 0 ? <button className="button back" onClick={() => { setStep(step - 1); setError(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><ArrowLeft size={17}/> Back</button> : <span className="action-note"><LockKeyhole size={15}/> Your details stay with BYTE</span>}
-    {step === 3 ? <button className="button primary" disabled={sending || !windowOpen} onClick={submit}>{sending ? 'Submitting…' : (previouslySubmitted ? 'Update submission' : 'Submit application')} <ArrowRight size={17}/></button> : <button className="button primary" disabled={recovering || (!windowOpen && step > 0)} onClick={next}>{recovering ? 'Finding your draft…' : 'Continue'} <ArrowRight size={17}/></button>}
+    {step === 3 ? (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+        <button className="button primary" disabled={sending || !windowOpen} onClick={submit}>
+          {!windowOpen ? 'Submissions closed' : sending ? 'Submitting…' : (previouslySubmitted ? 'Update submission' : 'Submit application')}{' '}
+          {!windowOpen ? <LockKeyhole size={17}/> : <ArrowRight size={17}/>}
+        </button>
+        {!windowOpen && <span style={{ fontSize: '12px', color: '#ffaaa0' }}>Submissions closed on 17 October at 1:00 AM IST. Drafts stay drafts.</span>}
+      </div>
+    ) : (
+      <button className="button primary" disabled={recovering} onClick={next}>
+        {recovering ? 'Finding your draft…' : 'Continue'} <ArrowRight size={17}/>
+      </button>
+    )}
   </div>
   </div></section></main></Shell>;
 }

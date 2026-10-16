@@ -14,7 +14,7 @@ test('API: draft recovery, autosave, submission updates and admin management', {
   const port = await freePort();
   const salt = randomBytes(16); const password = 'test-admin-password';
   const hash = `scrypt:${salt.toString('hex')}:${scryptSync(password, salt, 64).toString('hex')}`;
-  const process = spawn('node', ['--import', 'tsx', 'server/index.ts'], { env: { ...globalThis.process.env, PORT: String(port), DB_PATH: join(dir, 'test.sqlite'), ADMIN_PASSWORD_HASH: hash, SUBMISSION_OPENS_AT: '2020-01-01T00:00:00Z', SUBMISSION_CLOSES_AT: '' }, stdio: 'ignore' });
+  const process = spawn('node', ['--import', 'tsx', 'server/index.ts'], { env: { ...globalThis.process.env, PORT: String(port), DB_PATH: join(dir, 'test.sqlite'), ADMIN_PASSWORD_HASH: hash, SUBMISSION_OPENS_AT: '2020-01-01T00:00:00Z', SUBMISSION_CLOSES_AT: '', NEW_FORMS_CLOSES_AT: '' }, stdio: 'ignore' });
   const base = `http://127.0.0.1:${port}/api`;
   async function call(path: string, method = 'GET', body?: unknown, cookie = '') { const response = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', cookie }, body: body === undefined ? undefined : JSON.stringify(body) }); return { response, data: await response.json() as any }; }
   try {
@@ -253,6 +253,167 @@ test('API: closed submission window blocks editing already submitted application
     const recoverRes = await call('/draft/recover', 'POST', { name: 'Closed Student', enrollment: '11111111111' });
     assert.equal(recoverRes.response.status, 403);
     assert.ok(recoverRes.data.error.includes('submission window has closed'));
+  } finally {
+    process.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('API: creating new forms is blocked after NEW_FORMS_CLOSES_AT, but existing drafts can be recovered', { timeout: 15000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'byte-new-forms-closed-'));
+  const dbPath = join(dir, 'test.sqlite');
+  const setupDb = new DatabaseSync(dbPath);
+  setupDb.exec('CREATE TABLE submissions (enrollment TEXT PRIMARY KEY, name_key TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, submitted_at TEXT, profile_completed_at TEXT);');
+  const now = new Date().toISOString();
+  const existingDraft = {
+    student: { name: 'Existing Student', enrollment: '11111111111', email: 'exist@example.com', academicBranch: 'CSE', semester: '3', year: '2nd year (Sem 3)' },
+    selected: ['outreach'],
+    answers: {},
+    deptAnswers: {},
+    deptSelected: {},
+    status: 'draft',
+  };
+  setupDb.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,?,?)').run('11111111111', 'existing student', JSON.stringify(existingDraft), 'draft', now, null, null);
+  setupDb.close();
+
+  const port = await freePort();
+  const process = spawn('node', ['--import', 'tsx', 'server/index.ts'], {
+    env: {
+      ...globalThis.process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      SUBMISSION_OPENS_AT: '2020-01-01T00:00:00Z',
+      NEW_FORMS_CLOSES_AT: '2020-01-02T00:00:00Z',
+      SUBMISSION_CLOSES_AT: '2099-01-01T00:00:00Z',
+    },
+    stdio: 'ignore',
+  });
+  const base = `http://127.0.0.1:${port}/api`;
+  async function call(path: string, method = 'GET', body?: unknown, cookie = '') {
+    const response = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', cookie },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { response, data: await response.json() as any };
+  }
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try { await call('/tracks'); ready = true; break; } catch { await new Promise(r => setTimeout(r, 100)); }
+    }
+    assert.ok(ready, 'server started');
+
+    // Attempting to create a NEW draft after NEW_FORMS_CLOSES_AT fails with "You missed it"
+    const newStudentRes = await call('/draft/recover', 'POST', { name: 'Late Newcomer', enrollment: '22222222222' });
+    assert.equal(newStudentRes.response.status, 403);
+    assert.ok(newStudentRes.data.error.includes('You missed it. Better luck next year'));
+
+    // Attempting to recover an EXISTING draft succeeds
+    const existingRes = await call('/draft/recover', 'POST', { name: 'Existing Student', enrollment: '11111111111' });
+    assert.equal(existingRes.response.status, 200);
+    assert.equal(existingRes.data.found, true);
+    assert.equal(existingRes.data.submission.student.name, 'Existing Student');
+    assert.equal(existingRes.data.submission.status, 'draft');
+
+    // Window config endpoint reports canCreateNewForm: false and isOpen: true
+    const cfgRes = await call('/config/window');
+    assert.equal(cfgRes.response.status, 200);
+    assert.equal(cfgRes.data.canCreateNewForm, false);
+    assert.equal(cfgRes.data.isOpen, true);
+  } finally {
+    process.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('API: submissions are blocked after SUBMISSION_CLOSES_AT, drafts stay drafts', { timeout: 15000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'byte-submission-closed-'));
+  const dbPath = join(dir, 'test.sqlite');
+  const setupDb = new DatabaseSync(dbPath);
+  setupDb.exec('CREATE TABLE submissions (enrollment TEXT PRIMARY KEY, name_key TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, submitted_at TEXT, profile_completed_at TEXT);');
+  const now = new Date().toISOString();
+  const existingDraft = {
+    student: {
+      name: 'Unsubmitted Student',
+      enrollment: '33333333333',
+      email: 'student@example.com',
+      phone: '9876543210',
+      academicBranch: 'CSE',
+      semester: '3',
+      year: '2nd year (Sem 3)',
+      inOtherSocieties: false,
+      societies: [],
+    },
+    selected: ['outreach'],
+    answers: { outreach: { work: 'https://example.com' } },
+    deptAnswers: {
+      outreach: {
+        docUrl: 'https://drive.google.com/file/d/test12345',
+        docPublic: true,
+        fileName: true,
+        taskOrder: true,
+        noRealContact: true,
+        limitsRespected: true,
+        llmDisclosure: true,
+        q6Real: true,
+      },
+    },
+    deptSelected: {},
+    status: 'draft',
+    profileCompletedAt: now,
+  };
+  setupDb.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,?,?)').run('33333333333', 'unsubmitted student', JSON.stringify(existingDraft), 'draft', now, null, now);
+  setupDb.close();
+
+  const port = await freePort();
+  const process = spawn('node', ['--import', 'tsx', 'server/index.ts'], {
+    env: {
+      ...globalThis.process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      SUBMISSION_OPENS_AT: '2020-01-01T00:00:00Z',
+      NEW_FORMS_CLOSES_AT: '2020-01-02T00:00:00Z',
+      SUBMISSION_CLOSES_AT: '2020-01-03T00:00:00Z',
+    },
+    stdio: 'ignore',
+  });
+  const base = `http://127.0.0.1:${port}/api`;
+  async function call(path: string, method = 'GET', body?: unknown, cookie = '') {
+    const response = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', cookie },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { response, data: await response.json() as any };
+  }
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try { await call('/tracks'); ready = true; break; } catch { await new Promise(r => setTimeout(r, 100)); }
+    }
+    assert.ok(ready, 'server started');
+
+    // Existing draft can still be recovered
+    const recoverRes = await call('/draft/recover', 'POST', { name: 'Unsubmitted Student', enrollment: '33333333333' });
+    assert.equal(recoverRes.response.status, 200);
+    assert.equal(recoverRes.data.found, true);
+    assert.equal(recoverRes.data.submission.status, 'draft');
+
+    const draftCookie = recoverRes.response.headers.getSetCookie().find(c => c.startsWith('draft=') && !c.startsWith('draft=;'))?.split(';')[0] || '';
+    assert.ok(draftCookie, 'draft cookie obtained');
+
+    // Calling submit after deadline is rejected with 403
+    const submitRes = await call('/draft/submit', 'POST', {}, draftCookie);
+    assert.equal(submitRes.response.status, 403);
+    assert.ok(submitRes.data.error.includes('Drafts stay drafts and can no longer be submitted') || submitRes.data.error.includes('Submissions closed'));
+
+    // Verify directly in DB that the entry is still 'draft' and NOT submitted
+    const checkDb = new DatabaseSync(dbPath);
+    const row = checkDb.prepare('SELECT status, submitted_at FROM submissions WHERE enrollment = ?').get('33333333333') as { status: string; submitted_at: string | null };
+    checkDb.close();
+    assert.equal(row.status, 'draft', 'status remains draft');
+    assert.equal(row.submitted_at, null, 'submitted_at remains null');
   } finally {
     process.kill();
     rmSync(dir, { recursive: true, force: true });

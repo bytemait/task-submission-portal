@@ -4,6 +4,11 @@
  * render from this, so adding a department is a config change, not new code.
  */
 
+// ── Submission window & deadline defaults ───────────────────────────────────
+export const DEFAULT_SUBMISSION_OPENS = '2025-09-29T00:01:00+05:30';
+export const DEFAULT_NEW_FORMS_CLOSE = '2026-10-16T12:59:00+05:30';
+export const DEFAULT_SUBMISSION_CLOSE = '2026-10-17T01:00:00+05:30';
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type FieldType = 'url' | 'text' | 'textarea' | 'checkbox' | 'toggle' | 'select' | 'file' | 'multi-select' | 'url-list';
