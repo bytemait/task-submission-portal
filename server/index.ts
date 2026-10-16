@@ -8,16 +8,35 @@ import { tracks, type Submission } from '../shared/tracks.ts';
 import { validateEnrollment, validateProfile, yearForSemester } from '../shared/validation.ts';
 import { validateSubmission, checkRepository, normalizeEnrollment, normalizeStudentProfile, studentToProfileData, isSubmissionProfileComplete, checkDriveAccessibility } from './validation.ts';
 import { buildSubmissionsCsv, buildSubmissionsJson } from './export.ts';
-import { deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted } from '../shared/submissionConfig.ts';
+import { deptConfigs, getDeptConfig, isFieldActive, isTaskAttempted, DEFAULT_SUBMISSION_OPENS, DEFAULT_NEW_FORMS_CLOSE, DEFAULT_SUBMISSION_CLOSE } from '../shared/submissionConfig.ts';
 
 // ── Submission window (server-side enforcement) ─────────────────────────────
-const SUBMISSION_OPENS = new Date(process.env.SUBMISSION_OPENS_AT || '2025-09-29T00:01:00+05:30');
-const SUBMISSION_CLOSES_STR = process.env.SUBMISSION_CLOSES_AT || '';
+const SUBMISSION_OPENS_STR = process.env.SUBMISSION_OPENS_AT !== undefined
+  ? process.env.SUBMISSION_OPENS_AT
+  : DEFAULT_SUBMISSION_OPENS;
+const SUBMISSION_OPENS = SUBMISSION_OPENS_STR ? new Date(SUBMISSION_OPENS_STR) : new Date(0);
+
+const NEW_FORMS_CLOSES_STR = process.env.NEW_FORMS_CLOSES_AT !== undefined
+  ? process.env.NEW_FORMS_CLOSES_AT
+  : DEFAULT_NEW_FORMS_CLOSE;
+const NEW_FORMS_CLOSES = NEW_FORMS_CLOSES_STR ? new Date(NEW_FORMS_CLOSES_STR) : null;
+
+const SUBMISSION_CLOSES_STR = process.env.SUBMISSION_CLOSES_AT !== undefined
+  ? process.env.SUBMISSION_CLOSES_AT
+  : DEFAULT_SUBMISSION_CLOSE;
 const SUBMISSION_CLOSES = SUBMISSION_CLOSES_STR ? new Date(SUBMISSION_CLOSES_STR) : null;
+
 function isSubmissionWindowOpen(): boolean {
   const now = Date.now();
   if (now < SUBMISSION_OPENS.getTime()) return false;
   if (SUBMISSION_CLOSES && now > SUBMISSION_CLOSES.getTime()) return false;
+  return true;
+}
+
+function canCreateNewForm(): boolean {
+  const now = Date.now();
+  if (now < SUBMISSION_OPENS.getTime()) return false;
+  if (NEW_FORMS_CLOSES && now > NEW_FORMS_CLOSES.getTime()) return false;
   return true;
 }
 
@@ -114,7 +133,9 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/tracks', (_req, res) => res.json(tracks));
 app.get('/api/config/window', (_req, res) => res.json({
   opens: SUBMISSION_OPENS.toISOString(),
+  newFormsClose: NEW_FORMS_CLOSES ? NEW_FORMS_CLOSES.toISOString() : null,
   closes: SUBMISSION_CLOSES ? SUBMISSION_CLOSES.toISOString() : null,
+  canCreateNewForm: canCreateNewForm(),
   isOpen: isSubmissionWindowOpen(),
 }));
 app.get('/api/config/departments', (_req, res) => res.json(deptConfigs.map(d => ({
@@ -235,8 +256,19 @@ app.post('/api/draft/recover', (req, res) => {
       .run(JSON.stringify(submission), now, id);
     row = getRow(id);
   }
+  if (row) {
+    clear(req, res, 'draft'); setSession(res, 'draft', id);
+    res.json({ found: true, previouslySubmitted, submission: JSON.parse(row.payload) });
+    return;
+  }
+
+  // Row does not exist -> attempting to start a new form
+  if (!canCreateNewForm()) {
+    res.status(403).json({ error: 'You missed it. Better luck next year. New applications closed on 16 October at 12:59 PM.' });
+    return;
+  }
+
   clear(req, res, 'draft'); setSession(res, 'draft', id);
-  if (row) { res.json({ found: true, previouslySubmitted, submission: JSON.parse(row.payload) }); return; }
   const initial: Submission = {
     student: {
       name: name.trim(),
@@ -300,7 +332,7 @@ app.post('/api/draft/submit', async (req, res) => {
     if (now < SUBMISSION_OPENS.getTime()) {
       res.status(403).json({ error: `Submissions open on ${SUBMISSION_OPENS.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}. Please wait.` }); return;
     }
-    res.status(403).json({ error: 'The submission window has closed. Contact BYTE if you need assistance.' }); return;
+    res.status(403).json({ error: 'Submissions closed on 17 October at 1:00 AM IST. Drafts stay drafts and can no longer be submitted.' }); return;
   }
 
   const row = getRow(s.enrollment!); if (!row || row.status !== 'draft') { res.status(409).json({ error: 'Already submitted.' }); return; }
