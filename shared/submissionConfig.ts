@@ -6,7 +6,7 @@
 
 // ── Submission window & deadline defaults ───────────────────────────────────
 export const DEFAULT_SUBMISSION_OPENS = '2025-09-29T00:01:00+05:30';
-export const DEFAULT_NEW_FORMS_CLOSE = '2026-10-16T12:59:00+05:30';
+export const DEFAULT_NEW_FORMS_CLOSE = '2026-10-16T23:59:59+05:30';
 export const DEFAULT_SUBMISSION_CLOSE = '2026-10-17T01:00:00+05:30';
 
 // ── Types ───────────────────────────────────────────────────────────────────
