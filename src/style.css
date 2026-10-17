@@ -117,3 +117,15 @@
 .insight-pill{background:#112418;border:1px solid #203b26;border-radius:5px;padding:11px 12px;text-align:center}
 .insight-pill strong{display:block;font:700 16px 'Space Grotesk',sans-serif;color:#baf263;margin-bottom:2px}
 .insight-pill span{font-size:11px;color:#8da492;font-weight:600}
+
+/* ── Admin Notes ───────────────────────────────────────────────────────── */
+.admin-notes-section{margin-top:16px;padding-top:14px;border-top:1px dashed #2c4832}
+.admin-notes-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.admin-notes-header label{font-size:12px;font-weight:700;color:#baf263;display:flex;align-items:center;gap:6px;letter-spacing:.5px}
+.admin-notes-status{font-size:11px;color:#8da492;font-family:'DM Mono',monospace}
+.admin-notes-status.saving{color:#d8caa8}
+.admin-notes-status.saved{color:#baf263}
+.admin-notes-status.error{color:#ffaaa0}
+.admin-notes-textarea{width:100%;border:1px solid #2e4a33;border-radius:4px;background:#09170e;color:#e8eee7;padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.5;resize:vertical;min-height:68px;transition:border-color .2s,background .2s;box-sizing:border-box}
+.admin-notes-textarea:focus{outline:0;border-color:#baf263;background:#0e2114}
+.admin-notes-textarea::placeholder{color:#647c6b}
