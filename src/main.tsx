@@ -2041,6 +2041,19 @@ function Admin() {
     finally { setExporting(false); }
   }
 
+  function exportSingleJSON() {
+    if (!selected) return;
+    const jsonStr = JSON.stringify(selected, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json; charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const id = selected.student.enrollment || 'submission';
+    a.download = `submission-${id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div>
   <AdminMetrics
     items={items}
@@ -2061,6 +2074,9 @@ function Admin() {
         <Check size={16}/> {mutating === 'submitted' ? 'Moving to submission…' : 'Move to submission'}
       </button>
     )}
+    <button type="button" className="export-btn" onClick={exportSingleJSON} title="Download candidate submission as JSON">
+      <Download size={16}/> Export JSON
+    </button>
     <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}>
       <Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}
     </button>

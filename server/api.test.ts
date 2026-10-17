@@ -181,6 +181,14 @@ test('API: draft recovery, autosave, submission updates and admin management', {
     const listingWithNotes = await call('/admin/submissions', 'GET', undefined, adminCookie);
     assert.equal(listingWithNotes.data[0].adminNotes['web-dev'], 'Great job on canteen chaos');
 
+    // Individual JSON export
+    assert.equal((await call(entryPath + '/export.json', 'GET', undefined)).response.status, 401);
+    const singleExport = await call(entryPath + '/export.json', 'GET', undefined, adminCookie);
+    assert.equal(singleExport.response.status, 200);
+    assert.equal(singleExport.data.student.enrollment, '12345678901');
+    assert.equal(singleExport.data.adminNotes['web-dev'], 'Great job on canteen chaos');
+    assert.ok(singleExport.response.headers.get('content-disposition')?.includes('submission-12345678901.json'));
+
     // Submitted entries can be deleted and disappear from listings/exports.
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 200);
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 404);
