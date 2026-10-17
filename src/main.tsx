@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowRight, ArrowLeft, ArrowUpRight, BarChart3, Calendar, Check, CheckCircle2,
-  ChevronDown, ChevronUp, CircleHelp, Download, FolderTree as FolderTreeIcon,
-  GraduationCap, Layers, LockKeyhole, LogOut, Pencil, Plus, Search, Sparkles,
-  Trash2, TrendingUp, Upload, Users, X,
+  ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Download,
+  FolderTree as FolderTreeIcon, GraduationCap, Layers, LockKeyhole, LogOut,
+  Pencil, Plus, Search, Sparkles, Trash2, TrendingUp, Upload, Users, X,
 } from 'lucide-react';
 import { tracks, emptySubmission, type Submission, type Student, type Field } from '../shared/tracks.ts';
 import {
@@ -1977,6 +1977,34 @@ function Admin() {
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
   const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name || '', s.student.enrollment || '', s.student.email || ''].some(v => v.toLowerCase().includes(query.toLowerCase())));
 
+  const selectedIdx = selected ? visible.findIndex(s => s.student.enrollment === selected.student.enrollment) : -1;
+  const hasPrev = selectedIdx > 0;
+  const hasNext = selectedIdx >= 0 && selectedIdx < visible.length - 1;
+
+  useEffect(() => {
+    if (!selected) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'ArrowLeft' && hasPrev && !mutating) {
+        e.preventDefault();
+        setSelected(visible[selectedIdx - 1]);
+        setActionError('');
+      } else if (e.key === 'ArrowRight' && hasNext && !mutating) {
+        e.preventDefault();
+        setSelected(visible[selectedIdx + 1]);
+        setActionError('');
+      } else if (e.key === 'Escape' && !mutating) {
+        e.preventDefault();
+        setSelected(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selected, visible, selectedIdx, hasPrev, hasNext, mutating]);
+
   async function changeSubmission(action: 'draft' | 'submitted' | 'delete') {
     if (!selected || mutating) return;
     const entry = selected;
@@ -2094,26 +2122,68 @@ function Admin() {
     onFilterStatus={setStatus}
   />
   <div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
-  {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span>
-  <div className="detail-actions" aria-busy={!!mutating}>
-    {selected.status === 'submitted' ? (
-      <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}>
-        <Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}
-      </button>
-    ) : (
-      <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('submitted')}>
-        <Check size={16}/> {mutating === 'submitted' ? 'Moving to submission…' : 'Move to submission'}
-      </button>
-    )}
-    <button type="button" className="export-btn" onClick={exportSingleJSON} title="Download candidate submission as JSON">
-      <Download size={16}/> Export JSON
-    </button>
-    <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}>
-      <Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}
-    </button>
-  </div>
-  {actionError && <p className="error-banner" role="alert">{actionError}</p>}
-  <div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div><h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {
+  {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div>
+  <div className="detail-layout">
+    <aside className="detail-sidebar">
+      <div className="detail-nav-row">
+        <span className="detail-nav-counter">
+          {selectedIdx >= 0 ? `${selectedIdx + 1} of ${visible.length}` : `${visible.length} entries`}
+        </span>
+        <div className="detail-nav-buttons">
+          <button
+            type="button"
+            className="detail-nav-btn"
+            disabled={!hasPrev || !!mutating}
+            onClick={() => {
+              if (hasPrev) {
+                setSelected(visible[selectedIdx - 1]);
+                setActionError('');
+              }
+            }}
+            title="Previous candidate (Left arrow)"
+          >
+            <ChevronLeft size={15}/> Prev
+          </button>
+          <button
+            type="button"
+            className="detail-nav-btn"
+            disabled={!hasNext || !!mutating}
+            onClick={() => {
+              if (hasNext) {
+                setSelected(visible[selectedIdx + 1]);
+                setActionError('');
+              }
+            }}
+            title="Next candidate (Right arrow)"
+          >
+            Next <ChevronRight size={15}/>
+          </button>
+        </div>
+      </div>
+      <h2>{selected.student.name}</h2>
+      <span className={'badge ' + selected.status}>{selected.status}</span>
+      <div className="detail-actions" aria-busy={!!mutating}>
+        {selected.status === 'submitted' ? (
+          <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}>
+            <Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}
+          </button>
+        ) : (
+          <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('submitted')}>
+            <Check size={16}/> {mutating === 'submitted' ? 'Moving to submission…' : 'Move to submission'}
+          </button>
+        )}
+        <button type="button" className="export-btn" onClick={exportSingleJSON} title="Download candidate submission as JSON">
+          <Download size={16}/> Export JSON
+        </button>
+        <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}>
+          <Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}
+        </button>
+      </div>
+      {actionError && <p className="error-banner" role="alert">{actionError}</p>}
+      <div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div>
+    </aside>
+    <div className="detail-main">
+      <h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {
     const config = getDeptConfig(deptId);
     const deptAns = (selected.deptAnswers || {})[deptId] || {};
     const legacyAns = selected.answers?.[deptId] || {};
@@ -2238,7 +2308,7 @@ function Admin() {
         }}
       />
     </div>;
-  })}</section></div>}</Shell>;
+  })}</div></div></section></div>}</Shell>;
 }
 
 createRoot(document.getElementById('root')!).render(location.pathname === '/login' ? <Login/> : location.pathname === '/admin' ? <Admin/> : <Wizard/>);
