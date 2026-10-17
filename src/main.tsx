@@ -2000,12 +2000,14 @@ function DeptAdminNotes({
 // ── Admin ───────────────────────────────────────────────────────────────────
 function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [yearFilter, setYearFilter] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
+  const [sortKey, setSortKey] = useState<'student' | 'tracks' | 'status' | 'updatedAt'>('updatedAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [exporting, setExporting] = useState(false);
   const [mutating, setMutating] = useState<'draft' | 'submitted' | 'delete' | null>(null);
   const [savingPiApproval, setSavingPiApproval] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
-  const visible = items.filter(s => {
+  const filteredItems = items.filter(s => {
     const statusMatch = status === 'all' || s.status === status;
     const trackMatch = track === 'all' || s.selected.includes(track);
     const candidateYear = s.student.year || yearForSemester(s.student.semester) || '';
@@ -2023,6 +2025,38 @@ function Admin() {
 
     return statusMatch && trackMatch && yearMatch && queryMatch;
   });
+  const visible = [...filteredItems].sort((a, b) => {
+    let comparison = 0;
+    if (sortKey === 'student') {
+      comparison = (a.student.name || '').localeCompare(b.student.name || '', undefined, { sensitivity: 'base' });
+    } else if (sortKey === 'tracks') {
+      const names = (submission: Submission) => (submission.selected || [])
+        .map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id)
+        .join(', ');
+      comparison = names(a).localeCompare(names(b), undefined, { sensitivity: 'base' });
+    } else if (sortKey === 'status') {
+      comparison = a.status.localeCompare(b.status);
+    } else {
+      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      comparison = aTime - bTime;
+    }
+    return sortDirection === 'asc' ? comparison : -comparison;
+  });
+
+  function toggleSort(key: 'student' | 'tracks' | 'status' | 'updatedAt') {
+    if (sortKey === key) {
+      setSortDirection(current => current === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDirection(key === 'updatedAt' ? 'desc' : 'asc');
+    }
+  }
+
+  function sortIndicator(key: 'student' | 'tracks' | 'status' | 'updatedAt') {
+    if (sortKey !== key) return null;
+    return sortDirection === 'asc' ? <ChevronUp size={13}/> : <ChevronDown size={13}/>;
+  }
 
   const selectedIdx = selected ? visible.findIndex(s => s.student.enrollment === selected.student.enrollment) : -1;
   const hasPrev = selectedIdx > 0;
@@ -2170,7 +2204,7 @@ function Admin() {
     onSearchBranch={setQuery}
     onFilterStatus={setStatus}
   />
-  <div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label><span className="sr-only">Filter by year</span><select value={yearFilter} onChange={e => setYearFilter(e.target.value)}><option value="all">All years</option><option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option></select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
+  <div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label><span className="sr-only">Filter by year</span><select value={yearFilter} onChange={e => setYearFilter(e.target.value)}><option value="all">All years</option><option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option></select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><button type="button" className="table-sort-button" aria-sort={sortKey === 'student' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => toggleSort('student')}>STUDENT {sortIndicator('student')}</button><button type="button" className="table-sort-button" aria-sort={sortKey === 'tracks' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => toggleSort('tracks')}>TRACKS {sortIndicator('tracks')}</button><button type="button" className="table-sort-button" aria-sort={sortKey === 'status' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => toggleSort('status')}>STATUS {sortIndicator('status')}</button><button type="button" className="table-sort-button" aria-sort={sortKey === 'updatedAt' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => toggleSort('updatedAt')}>LAST UPDATED {sortIndicator('updatedAt')}</button><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
   {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div>
   <div className="detail-layout">
     <aside className="detail-sidebar">
