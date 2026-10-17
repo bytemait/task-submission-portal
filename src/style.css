@@ -91,8 +91,9 @@
 .dept-metric-total{font-weight:700;color:#e8eee7;font-family:'Space Grotesk',sans-serif;font-size:14px}
 .dept-metric-split{color:#8da492;font-size:11px}
 .metric-progress-track{height:6px;background:#172d1e;border-radius:3px;overflow:hidden;display:flex}
-.metric-progress-fill-submitted{background:#baf263;height:100%}
-.metric-progress-fill-draft{background:#3c6b45;height:100%}
+.metric-progress-fill-pi{background:#38bdf8;height:100%;flex-shrink:0}
+.metric-progress-fill-submitted{background:#baf263;height:100%;flex-shrink:0}
+.metric-progress-fill-draft{background:#3c6b45;height:100%;flex-shrink:0}
 .timeline-chart-wrap{position:relative;width:100%;overflow-x:auto}
 .timeline-legend{display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:#9cb29f}
 .timeline-legend-item{display:flex;align-items:center;gap:6px}
@@ -111,8 +112,11 @@
 .branch-row{display:grid;grid-template-columns:85px 1fr 65px;align-items:center;gap:12px;font-size:13px;padding:6px 8px;border-radius:4px;cursor:pointer;transition:background .2s}
 .branch-row:hover{background:#142a1b}
 .branch-name{font-weight:700;color:#e8eee7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.branch-bar-wrap{height:8px;background:#172d1e;border-radius:4px;overflow:hidden}
+.branch-bar-wrap{height:8px;background:#172d1e;border-radius:4px;overflow:hidden;display:flex}
 .branch-bar-fill{background:linear-gradient(90deg,#3d6844 0%,#baf263 100%);height:100%;border-radius:4px}
+.branch-bar-fill-pi{height:100%;background:#38bdf8;flex-shrink:0}
+.branch-bar-fill-submitted{height:100%;background:#baf263;flex-shrink:0}
+.branch-bar-fill-draft{height:100%;background:#3c6b45;flex-shrink:0}
 .branch-count{text-align:right;font-weight:600;color:#9cb29f;font-family:'DM Mono',monospace;font-size:12px}
 .insights-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
 @media(max-width:700px){.insights-row{grid-template-columns:1fr}}

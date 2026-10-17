@@ -1372,7 +1372,7 @@ function AdminMetrics({
 }) {
   const [activeTab, setActiveTab] = useState<'all' | 'departments' | 'timeline' | 'demographics'>('all');
   const [collapsed, setCollapsed] = useState(false);
-  const [hoveredDay, setHoveredDay] = useState<{ dateKey: string; label: string; submitted: number; drafts: number; total: number } | null>(null);
+  const [hoveredDay, setHoveredDay] = useState<{ dateKey: string; label: string; piApproved: number; submitted: number; drafts: number; total: number } | null>(null);
 
   const total = items.length;
   const submitted = items.filter(i => i.status === 'submitted').length;
@@ -1380,18 +1380,21 @@ function AdminMetrics({
   const conversionRate = total > 0 ? ((submitted / total) * 100).toFixed(1) : '0';
   const totalTrackPicks = items.reduce((acc, s) => acc + (s.selected ? s.selected.length : 0), 0);
   const avgTracks = total > 0 ? (totalTrackPicks / total).toFixed(1) : '0';
+  const piApprovedTotal = items.filter(s => Object.values(s.piApproved || {}).some(Boolean)).length;
 
   // 1. Department Breakdown
   const deptStats = deptConfigs.map(dept => {
     const inDept = items.filter(s => s.selected?.includes(dept.id));
-    const deptSubmitted = inDept.filter(s => s.status === 'submitted').length;
-    const deptDraft = inDept.filter(s => s.status === 'draft').length;
+    const deptPiApproved = inDept.filter(s => Boolean(s.piApproved?.[dept.id])).length;
+    const deptSubmitted = inDept.filter(s => s.status === 'submitted' && !s.piApproved?.[dept.id]).length;
+    const deptDraft = inDept.filter(s => s.status === 'draft' && !s.piApproved?.[dept.id]).length;
     return {
       id: dept.id,
       name: dept.name,
       category: dept.category,
       color: dept.color,
       total: inDept.length,
+      piApproved: deptPiApproved,
       submitted: deptSubmitted,
       draft: deptDraft,
       percentage: total > 0 ? Math.round((inDept.length / total) * 100) : 0,
@@ -1403,21 +1406,23 @@ function AdminMetrics({
 
   // 2. Day-Wise Timeline
   const dates = new Set<string>();
-  const dayCounts = new Map<string, { submitted: number; drafts: number }>();
+  const dayCounts = new Map<string, { piApproved: number; submitted: number; drafts: number }>();
 
   items.forEach(s => {
     const k = getISTDateKey(s.submittedAt || s.updatedAt);
     if (k) {
       dates.add(k);
-      if (!dayCounts.has(k)) dayCounts.set(k, { submitted: 0, drafts: 0 });
+      if (!dayCounts.has(k)) dayCounts.set(k, { piApproved: 0, submitted: 0, drafts: 0 });
       const entry = dayCounts.get(k)!;
-      if (s.status === 'submitted') entry.submitted++;
+      const approved = Object.values(s.piApproved || {}).some(Boolean);
+      if (approved) entry.piApproved++;
+      else if (s.status === 'submitted') entry.submitted++;
       else entry.drafts++;
     }
   });
 
   const sortedDates = Array.from(dates).sort();
-  const timeline: { dateKey: string; label: string; submitted: number; drafts: number; total: number }[] = [];
+  const timeline: { dateKey: string; label: string; piApproved: number; submitted: number; drafts: number; total: number }[] = [];
 
   if (sortedDates.length > 0) {
     const minD = new Date(sortedDates[0] + 'T00:00:00+05:30');
@@ -1428,31 +1433,33 @@ function AdminMetrics({
     if (spanDays >= 0 && spanDays <= 30) {
       for (let cur = new Date(minD); cur <= maxD; cur = new Date(cur.getTime() + dayMs)) {
         const k = getISTDateKey(cur.toISOString());
-        const d = dayCounts.get(k) || { submitted: 0, drafts: 0 };
+        const d = dayCounts.get(k) || { piApproved: 0, submitted: 0, drafts: 0 };
         timeline.push({
           dateKey: k,
           label: formatISTDayLabel(k),
+          piApproved: d.piApproved,
           submitted: d.submitted,
           drafts: d.drafts,
-          total: d.submitted + d.drafts,
+          total: d.piApproved + d.submitted + d.drafts,
         });
       }
     } else {
       sortedDates.forEach(k => {
-        const d = dayCounts.get(k) || { submitted: 0, drafts: 0 };
+        const d = dayCounts.get(k) || { piApproved: 0, submitted: 0, drafts: 0 };
         timeline.push({
           dateKey: k,
           label: formatISTDayLabel(k),
+          piApproved: d.piApproved,
           submitted: d.submitted,
           drafts: d.drafts,
-          total: d.submitted + d.drafts,
+          total: d.piApproved + d.submitted + d.drafts,
         });
       });
     }
   }
 
   const maxTimelineTotal = Math.max(...timeline.map(t => t.total), 5);
-  const peakDay = timeline.reduce<{ dateKey: string; label: string; submitted: number; drafts: number; total: number } | null>(
+  const peakDay = timeline.reduce<{ dateKey: string; label: string; piApproved: number; submitted: number; drafts: number; total: number } | null>(
     (prev, cur) => (cur.total > (prev?.total || 0) ? cur : prev),
     timeline[0] || null
   );
@@ -1474,11 +1481,13 @@ function AdminMetrics({
         s.student.semester === String(Number(y.key) * 2)
       );
     });
-    const subCount = matches.filter(s => s.status === 'submitted').length;
-    const drfCount = matches.filter(s => s.status === 'draft').length;
+    const yearPiApproved = matches.filter(s => Object.values(s.piApproved || {}).some(Boolean)).length;
+    const subCount = matches.filter(s => s.status === 'submitted' && !Object.values(s.piApproved || {}).some(Boolean)).length;
+    const drfCount = matches.filter(s => s.status === 'draft' && !Object.values(s.piApproved || {}).some(Boolean)).length;
     return {
       ...y,
       total: matches.length,
+      piApproved: yearPiApproved,
       submitted: subCount,
       drafts: drfCount,
       percentage: total > 0 ? Math.round((matches.length / total) * 100) : 0,
@@ -1487,13 +1496,14 @@ function AdminMetrics({
   });
 
   // 4. College Branch Stats
-  const branchMap = new Map<string, { total: number; submitted: number; drafts: number }>();
+  const branchMap = new Map<string, { total: number; piApproved: number; submitted: number; drafts: number }>();
   items.forEach(s => {
     const b = (s.student.academicBranch || 'Not specified').trim();
-    if (!branchMap.has(b)) branchMap.set(b, { total: 0, submitted: 0, drafts: 0 });
+    if (!branchMap.has(b)) branchMap.set(b, { total: 0, piApproved: 0, submitted: 0, drafts: 0 });
     const e = branchMap.get(b)!;
     e.total++;
-    if (s.status === 'submitted') e.submitted++;
+    if (Object.values(s.piApproved || {}).some(Boolean)) e.piApproved++;
+    else if (s.status === 'submitted') e.submitted++;
     else e.drafts++;
   });
 
@@ -1532,6 +1542,11 @@ function AdminMetrics({
           <small>IN PROGRESS</small>
           <strong style={{ color: '#d8caa8' }}>{drafts}</strong>
           <span className="stats-subtext">{total > 0 ? Math.round((drafts / total) * 100) : 0}% active drafts</span>
+        </div>
+        <div>
+          <small>PI APPROVED</small>
+          <strong style={{ color: '#38bdf8' }}>{piApprovedTotal}</strong>
+          <span className="stats-subtext">Applicants approved for at least one task</span>
         </div>
         <div>
           <small>TRACK SELECTIONS</small>
@@ -1596,7 +1611,7 @@ function AdminMetrics({
                   <Layers size={18}/>
                   <div>
                     <h3>Department Breakdown</h3>
-                    <p className="metric-card-sub">Selections per track · click to filter entries</p>
+                    <p className="metric-card-sub">PI approved, submitted and draft counts per track · click to filter</p>
                   </div>
                 </div>
                 {selectedTrack !== 'all' ? (
@@ -1606,6 +1621,11 @@ function AdminMetrics({
                 )}
               </div>
 
+              <div className="timeline-legend" style={{ marginBottom: 14 }}>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#38bdf8' }}/><span>PI Approved</span></div>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#baf263' }}/><span>Submitted (not PI approved)</span></div>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#3c6b45' }}/><span>Draft (not PI approved)</span></div>
+              </div>
               <div className="dept-metric-list">
                 {deptStats.map(d => {
                   const isSelected = selectedTrack === d.id;
@@ -1624,20 +1644,13 @@ function AdminMetrics({
                         </div>
                         <div className="dept-metric-nums">
                           <span className="dept-metric-total">{d.total}</span>
-                          <span className="dept-metric-split">({d.submitted} submitted · {d.draft} drafts)</span>
+                          <span className="dept-metric-split">({d.piApproved} PI · {d.submitted} submitted · {d.draft} drafts)</span>
                         </div>
                       </div>
                       <div className="metric-progress-track">
-                        <div
-                          className="metric-progress-fill-submitted"
-                          style={{ width: `${(d.submitted / maxDeptTotal) * 100}%` }}
-                          title={`${d.submitted} submitted`}
-                        />
-                        <div
-                          className="metric-progress-fill-draft"
-                          style={{ width: `${(d.draft / maxDeptTotal) * 100}%` }}
-                          title={`${d.draft} in draft`}
-                        />
+                        <div className="metric-progress-fill-pi" style={{ width: `${(d.piApproved / maxDeptTotal) * 100}%` }} title={`${d.piApproved} PI approved`}/>
+                        <div className="metric-progress-fill-submitted" style={{ width: `${(d.submitted / maxDeptTotal) * 100}%` }} title={`${d.submitted} submitted (not PI approved)`}/>
+                        <div className="metric-progress-fill-draft" style={{ width: `${(d.draft / maxDeptTotal) * 100}%` }} title={`${d.draft} drafts (not PI approved)`}/>
                       </div>
                     </div>
                   );
@@ -1654,11 +1667,11 @@ function AdminMetrics({
                   <TrendingUp size={18}/>
                   <div>
                     <h3>Submission Timeline</h3>
-                    <p className="metric-card-sub">Daily count of submissions and registrations (IST)</p>
+                    <p className="metric-card-sub">Daily applicant activity in IST; PI approvals are grouped by the applicant activity date, not the approval date.</p>
                   </div>
                 </div>
                 {peakDay && peakDay.total > 0 && (
-                  <span className="metric-card-badge">Peak: {peakDay.label} ({peakDay.total})</span>
+                  <span className="metric-card-badge">Peak activity: {peakDay.label} ({peakDay.total})</span>
                 )}
               </div>
 
@@ -1667,14 +1680,9 @@ function AdminMetrics({
               ) : (
                 <>
                   <div className="timeline-legend">
-                    <div className="timeline-legend-item">
-                      <span className="timeline-legend-color" style={{ background: '#baf263' }}/>
-                      <span>Submitted</span>
-                    </div>
-                    <div className="timeline-legend-item">
-                      <span className="timeline-legend-color" style={{ background: '#39613e' }}/>
-                      <span>Active / Draft</span>
-                    </div>
+                    <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#38bdf8' }}/><span>PI Approved</span></div>
+                    <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#baf263' }}/><span>Submitted (not PI approved)</span></div>
+                    <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#39613e' }}/><span>Draft (not PI approved)</span></div>
                   </div>
 
                   <div className="timeline-chart-wrap">
@@ -1701,6 +1709,7 @@ function AdminMetrics({
                         const barW = Math.min(32, Math.max(8, stepW * 0.58));
                         const cx = 40 + (i + 0.5) * stepW;
                         const totalH = (d.total / maxTimelineTotal) * 105;
+                        const piApprovedH = (d.piApproved / maxTimelineTotal) * 105;
                         const submittedH = (d.submitted / maxTimelineTotal) * 105;
                         const draftH = (d.drafts / maxTimelineTotal) * 105;
                         const yBase = 130;
@@ -1715,24 +1724,35 @@ function AdminMetrics({
                           >
                             <rect x={cx - stepW / 2} y="15" width={stepW} height="130" fill="transparent"/>
 
-                            {submittedH > 0 && (
-                              <rect
-                                x={cx - barW / 2}
-                                y={yBase - submittedH}
-                                width={barW}
-                                height={submittedH}
-                                fill={isHovered ? '#d4ffa3' : '#baf263'}
-                                rx={draftH === 0 ? 3 : 0}
-                              />
-                            )}
-
                             {draftH > 0 && (
                               <rect
                                 x={cx - barW / 2}
-                                y={yBase - totalH}
+                                y={yBase - draftH}
                                 width={barW}
                                 height={draftH}
                                 fill={isHovered ? '#4e8255' : '#39613e'}
+                                rx={piApprovedH === 0 && submittedH === 0 ? 3 : 0}
+                              />
+                            )}
+
+                            {submittedH > 0 && (
+                              <rect
+                                x={cx - barW / 2}
+                                y={yBase - draftH - submittedH}
+                                width={barW}
+                                height={submittedH}
+                                fill={isHovered ? '#d4ffa3' : '#baf263'}
+                                rx={piApprovedH === 0 ? 3 : 0}
+                              />
+                            )}
+
+                            {piApprovedH > 0 && (
+                              <rect
+                                x={cx - barW / 2}
+                                y={yBase - draftH - submittedH - piApprovedH}
+                                width={barW}
+                                height={piApprovedH}
+                                fill={isHovered ? '#7dd3fc' : '#38bdf8'}
                                 rx={3}
                               />
                             )}
@@ -1768,8 +1788,8 @@ function AdminMetrics({
 
                     {hoveredDay && (
                       <div className="timeline-active-info">
-                        <span><strong>{hoveredDay.label}</strong>: {hoveredDay.total} total activity</span>
-                        <span>{hoveredDay.submitted} submitted · {hoveredDay.drafts} in-progress</span>
+                        <span><strong>{hoveredDay.label}</strong>: {hoveredDay.total} applicants by activity date</span>
+                        <span>{hoveredDay.piApproved} PI approved · {hoveredDay.submitted} submitted · {hoveredDay.drafts} drafts</span>
                       </div>
                     )}
                   </div>
@@ -1812,20 +1832,13 @@ function AdminMetrics({
                       <div className="year-card-count">{y.total}</div>
                     </div>
                     <div className="metric-progress-track">
-                      <div
-                        className="metric-progress-fill-submitted"
-                        style={{ width: `${y.total > 0 ? (y.submitted / y.total) * 100 : 0}%` }}
-                        title={`${y.submitted} submitted`}
-                      />
-                      <div
-                        className="metric-progress-fill-draft"
-                        style={{ width: `${y.total > 0 ? (y.drafts / y.total) * 100 : 0}%` }}
-                        title={`${y.drafts} drafts`}
-                      />
+                      <div className="metric-progress-fill-pi" style={{ width: `${y.total > 0 ? (y.piApproved / y.total) * 100 : 0}%` }} title={`${y.piApproved} PI approved`}/>
+                      <div className="metric-progress-fill-submitted" style={{ width: `${y.total > 0 ? (y.submitted / y.total) * 100 : 0}%` }} title={`${y.submitted} submitted (not PI approved)`}/>
+                      <div className="metric-progress-fill-draft" style={{ width: `${y.total > 0 ? (y.drafts / y.total) * 100 : 0}%` }} title={`${y.drafts} drafts (not PI approved)`}/>
                     </div>
                     <div className="year-card-details">
                       <span>{y.percentage}% of pool</span>
-                      <span>{y.submitted} sub · {y.drafts} draft ({y.convRate}% done)</span>
+                      <span>{y.piApproved} PI · {y.submitted} sub · {y.drafts} draft</span>
                     </div>
                   </div>
                 ))}
@@ -1863,6 +1876,11 @@ function AdminMetrics({
                 <span className="metric-card-badge">{branchStats.length} branches</span>
               </div>
 
+              <div className="timeline-legend" style={{ marginBottom: 12 }}>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#38bdf8' }}/><span>PI Approved</span></div>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#baf263' }}/><span>Submitted</span></div>
+                <div className="timeline-legend-item"><span className="timeline-legend-color" style={{ background: '#3c6b45' }}/><span>Draft</span></div>
+              </div>
               <div className="branch-list">
                 {branchStats.slice(0, 8).map(b => (
                   <div
@@ -1873,12 +1891,11 @@ function AdminMetrics({
                   >
                     <span className="branch-name">{b.branch}</span>
                     <div className="branch-bar-wrap">
-                      <div
-                        className="branch-bar-fill"
-                        style={{ width: `${(b.total / maxBranchTotal) * 100}%` }}
-                      />
+                      <div className="branch-bar-fill-pi" style={{ width: `${(b.piApproved / maxBranchTotal) * 100}%` }} title={`${b.piApproved} PI approved`}/>
+                      <div className="branch-bar-fill-submitted" style={{ width: `${(b.submitted / maxBranchTotal) * 100}%` }} title={`${b.submitted} submitted`}/>
+                      <div className="branch-bar-fill-draft" style={{ width: `${(b.drafts / maxBranchTotal) * 100}%` }} title={`${b.drafts} drafts`}/>
                     </div>
-                    <span className="branch-count">{b.total} <small style={{ color: '#738d77', fontSize: 10 }}>({b.percentage}%)</small></span>
+                    <span className="branch-count">{b.total} <small style={{ color: '#38bdf8', fontSize: 10 }}>({b.piApproved} PI)</small></span>
                   </div>
                 ))}
               </div>
