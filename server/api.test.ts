@@ -122,7 +122,10 @@ test('API: draft recovery, autosave, submission updates and admin management', {
     }
     assert.equal((await call('/admin/submissions', 'PATCH', { status: 'draft' }, adminCookie)).response.status, 400);
     assert.equal((await call('/admin/submissions', 'DELETE', {}, adminCookie)).response.status, 400);
-    assert.equal((await call(entryPath, 'PATCH', { status: 'submitted' }, adminCookie)).response.status, 400);
+    // Already submitted -> returns 409
+    assert.equal((await call(entryPath, 'PATCH', { status: 'submitted' }, adminCookie)).response.status, 409);
+    // Invalid status -> returns 400
+    assert.equal((await call(entryPath, 'PATCH', { status: 'unknown' }, adminCookie)).response.status, 400);
     assert.equal((await call(entryPath, 'PATCH', {}, adminCookie)).response.status, 400);
     assert.equal((await call('/admin/submissions/99999999999', 'PATCH', { status: 'draft' }, adminCookie)).response.status, 404);
     assert.equal((await call('/admin/submissions/99999999999', 'DELETE', undefined, adminCookie)).response.status, 404);
@@ -139,6 +142,17 @@ test('API: draft recovery, autosave, submission updates and admin management', {
     assert.deepEqual(moved.data.deptAnswers, listing.data[0].deptAnswers);
     assert.deepEqual(moved.data.deptSelected, listing.data[0].deptSelected);
     assert.equal((await call(entryPath, 'PATCH', { status: 'draft' }, adminCookie)).response.status, 409);
+
+    // Moving draft to submitted
+    const movedToSubmitted = await call(entryPath, 'PATCH', { status: 'submitted' }, adminCookie);
+    assert.equal(movedToSubmitted.response.status, 200);
+    assert.equal(movedToSubmitted.data.status, 'submitted');
+    assert.ok(movedToSubmitted.data.submittedAt);
+    assert.equal((await call(entryPath, 'PATCH', { status: 'submitted' }, adminCookie)).response.status, 409);
+
+    // Move back to draft for remaining recovery tests
+    const movedAgain = await call(entryPath, 'PATCH', { status: 'draft' }, adminCookie);
+    assert.equal(movedAgain.response.status, 200);
     const draftListing = await call('/admin/submissions', 'GET', undefined, adminCookie);
     assert.equal(draftListing.data[0].status, 'draft');
     assert.equal(draftListing.data[0].submittedAt, null);
