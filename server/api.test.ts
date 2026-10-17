@@ -168,6 +168,19 @@ test('API: draft recovery, autosave, submission updates and admin management', {
     assert.equal((await call('/draft', 'PUT', resumed.data.submission, resumedCookie)).response.status, 200);
     assert.equal((await call('/draft/submit', 'POST', {}, resumedCookie)).response.status, 200);
 
+    // Admin notes endpoint
+    // Unauthorized calls reject
+    assert.equal((await call(entryPath + '/notes', 'PUT', { deptId: 'web-dev', notes: 'Great job' })).response.status, 401);
+    // Invalid inputs reject
+    assert.equal((await call(entryPath + '/notes', 'PUT', { deptId: '', notes: 'Great job' }, adminCookie)).response.status, 400);
+    // Saving notes succeeds
+    const notesRes = await call(entryPath + '/notes', 'PUT', { deptId: 'web-dev', notes: 'Great job on canteen chaos' }, adminCookie);
+    assert.equal(notesRes.response.status, 200);
+    assert.equal(notesRes.data.adminNotes['web-dev'], 'Great job on canteen chaos');
+    // Fetching admin listings includes adminNotes
+    const listingWithNotes = await call('/admin/submissions', 'GET', undefined, adminCookie);
+    assert.equal(listingWithNotes.data[0].adminNotes['web-dev'], 'Great job on canteen chaos');
+
     // Submitted entries can be deleted and disappear from listings/exports.
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 200);
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 404);

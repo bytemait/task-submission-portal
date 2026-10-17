@@ -1883,6 +1883,90 @@ function AdminMetrics({
   );
 }
 
+// ── Department Admin Notes ──────────────────────────────────────────────────
+function DeptAdminNotes({
+  enrollment,
+  deptId,
+  initialNotes = '',
+  onNotesSaved,
+}: {
+  enrollment: string;
+  deptId: string;
+  initialNotes?: string;
+  onNotesSaved: (deptId: string, notes: string) => void;
+}) {
+  const [notes, setNotes] = useState(initialNotes || '');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const lastSaved = useRef(initialNotes || '');
+
+  useEffect(() => {
+    setNotes(initialNotes || '');
+    lastSaved.current = initialNotes || '';
+    setStatus('idle');
+  }, [initialNotes, enrollment, deptId]);
+
+  const saveNotes = useCallback(async (val: string) => {
+    if (val === lastSaved.current) return;
+    setStatus('saving');
+    try {
+      await api<{ ok: boolean; adminNotes: Record<string, string> }>(
+        `/admin/submissions/${encodeURIComponent(enrollment)}/notes`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ deptId, notes: val }),
+        }
+      );
+      lastSaved.current = val;
+      setStatus('saved');
+      onNotesSaved(deptId, val);
+      setTimeout(() => {
+        setStatus(curr => (curr === 'saved' ? 'idle' : curr));
+      }, 2000);
+    } catch {
+      setStatus('error');
+    }
+  }, [enrollment, deptId, onNotesSaved]);
+
+  useEffect(() => {
+    if (notes === lastSaved.current) return;
+    const timer = setTimeout(() => {
+      saveNotes(notes);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [notes, saveNotes]);
+
+  return (
+    <div className="admin-notes-section">
+      <div className="admin-notes-header">
+        <label htmlFor={`notes-${deptId}`}>
+          <Pencil size={12}/> Notes
+        </label>
+        <span className={'admin-notes-status ' + status}>
+          {status === 'saving' && 'Saving…'}
+          {status === 'saved' && 'Saved ✓'}
+          {status === 'error' && 'Failed to save notes'}
+        </span>
+      </div>
+      <textarea
+        id={`notes-${deptId}`}
+        className="admin-notes-textarea"
+        placeholder="Write admin notes for this task submission (autosaves)..."
+        value={notes}
+        onChange={e => {
+          setNotes(e.target.value);
+          setStatus('idle');
+        }}
+        onBlur={() => {
+          if (notes !== lastSaved.current) {
+            saveNotes(notes);
+          }
+        }}
+        rows={2}
+      />
+    </div>
+  );
+}
+
 // ── Admin ───────────────────────────────────────────────────────────────────
 function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
@@ -2021,6 +2105,19 @@ function Admin() {
             {task.checkboxes.filter(cb => deptAns[cb.key]).map(cb => <p key={cb.key} style={{fontSize:12,color:'#baf263',margin:'4px 0'}}>✓ {formatCheckboxLabel(config.id, cb.key, cb.label, selected.student.name, selected.student.academicBranch)}</p>)}
           </div>;
         })}
+        <DeptAdminNotes
+          enrollment={selected.student.enrollment}
+          deptId={config.id}
+          initialNotes={selected.adminNotes?.[config.id] || ''}
+          onNotesSaved={(dId, newNotes) => {
+            const updatedSub: Submission = {
+              ...selected,
+              adminNotes: { ...(selected.adminNotes || {}), [dId]: newNotes },
+            };
+            setSelected(updatedSub);
+            setItems(curr => curr.map(item => item.student.enrollment === selected.student.enrollment ? updatedSub : item));
+          }}
+        />
       </div>;
     }
     const track = tracks.find(t => t.id === deptId);
@@ -2028,6 +2125,19 @@ function Admin() {
     return <div className="detail-track" key={track.id}>
       <h4>{track.name}</h4>
       {track.fields.map(f => <div key={f.key}><small>{f.label}</small><p>{legacyAns[f.key] ? (f.type === 'url' ? <a href={legacyAns[f.key]} target="_blank" rel="noreferrer">{legacyAns[f.key]} <ArrowUpRight size={13}/></a> : legacyAns[f.key]) : '—'}</p></div>)}
+      <DeptAdminNotes
+        enrollment={selected.student.enrollment}
+        deptId={track.id}
+        initialNotes={selected.adminNotes?.[track.id] || ''}
+        onNotesSaved={(dId, newNotes) => {
+          const updatedSub: Submission = {
+            ...selected,
+            adminNotes: { ...(selected.adminNotes || {}), [dId]: newNotes },
+          };
+          setSelected(updatedSub);
+          setItems(curr => curr.map(item => item.student.enrollment === selected.student.enrollment ? updatedSub : item));
+        }}
+      />
     </div>;
   })}</section></div>}</Shell>;
 }

@@ -315,7 +315,9 @@ app.put('/api/draft', (req, res) => {
   const errors = validateSubmission(payload, false);
   if (errors.length) { res.status(400).json({ error: errors[0] }); return; }
   const now = new Date().toISOString();
-  db.prepare('UPDATE submissions SET payload=?,updated_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify({ ...payload, status: 'draft', updatedAt: now }), now, s.enrollment);
+  const existing = JSON.parse(row.payload) as Submission;
+  const toSave = { ...payload, adminNotes: existing.adminNotes, status: 'draft', updatedAt: now };
+  db.prepare('UPDATE submissions SET payload=?,updated_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify(toSave), now, s.enrollment);
   res.json({ updatedAt: now });
 });
 app.post('/api/repositories/check', async (req, res) => {
@@ -398,7 +400,9 @@ app.post('/api/draft/submit', async (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const result = db.prepare('UPDATE submissions SET payload=?,status=\'submitted\',updated_at=?,submitted_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify({ ...payload, status: 'submitted', submittedAt: now, updatedAt: now }), now, now, s.enrollment);
+  const existingSub = JSON.parse(row.payload) as Submission;
+  const toSubmit = { ...payload, adminNotes: existingSub.adminNotes, status: 'submitted', submittedAt: now, updatedAt: now };
+  const result = db.prepare('UPDATE submissions SET payload=?,status=\'submitted\',updated_at=?,submitted_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify(toSubmit), now, now, s.enrollment);
   if (!result.changes) { res.status(409).json({ error: 'Already submitted.' }); return; }
   clear(req, res, 'draft'); res.json({ submittedAt: now, warnings: warnings.length ? warnings : undefined });
 });
@@ -470,6 +474,28 @@ const handleAdminDelete: express.RequestHandler = (req, res) => {
   }
   res.json({ ok: true });
 };
+const handleAdminNotes: express.RequestHandler = (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const enrollment = getAdminTargetEnrollment(req);
+  if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
+  const row = getRow(enrollment);
+  if (!row) { res.status(404).json({ error: 'Submission not found.' }); return; }
+  const { deptId, notes } = req.body || {};
+  if (typeof deptId !== 'string' || !deptId.trim() || typeof notes !== 'string') {
+    res.status(400).json({ error: 'deptId and notes are required strings.' });
+    return;
+  }
+  const submission = JSON.parse(row.payload) as Submission;
+  const adminNotes = { ...(submission.adminNotes || {}), [deptId.trim()]: notes };
+  const now = new Date().toISOString();
+  const updatedSubmission: Submission = { ...submission, adminNotes, updatedAt: now };
+  db.prepare('UPDATE submissions SET payload=?, updated_at=? WHERE enrollment=?')
+    .run(JSON.stringify(updatedSubmission), now, enrollment);
+  res.json({ ok: true, adminNotes, updatedAt: now });
+};
+
+app.put('/api/admin/submissions/notes', handleAdminNotes);
+app.put('/api/admin/submissions/:enrollment/notes', handleAdminNotes);
 app.patch('/api/admin/submissions', handleAdminStatusChange);
 app.patch('/api/admin/submissions/:enrollment', handleAdminStatusChange);
 app.delete('/api/admin/submissions', handleAdminDelete);

@@ -81,6 +81,8 @@ export type Submission = {
   updatedAt?: string;
   submittedAt?: string;
   profileCompletedAt?: string;
+  /** Admin reviewer notes keyed by department ID */
+  adminNotes?: Record<string, string>;
 };
 
 export const emptySubmission = (): Submission => ({
