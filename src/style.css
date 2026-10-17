@@ -100,7 +100,9 @@
 .timeline-active-info{background:#142a1c;border:1px solid #2c4c32;border-radius:4px;padding:8px 12px;font-size:12px;color:#baf263;margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .year-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 @media(max-width:600px){.year-grid{grid-template-columns:1fr}}
-.year-card{background:#112418;border:1px solid #203b26;border-radius:5px;padding:13px 15px;display:flex;flex-direction:column;gap:8px}
+.year-card{background:#112418;border:1px solid #203b26;border-radius:5px;padding:13px 15px;display:flex;flex-direction:column;gap:8px;cursor:pointer;transition:all .2s}
+.year-card:hover{background:#183321;border-color:#3e6e47}
+.year-card.active{background:#1c3d25;border-color:#baf263}
 .year-card-top{display:flex;justify-content:space-between;align-items:baseline}
 .year-card-label{font-size:13px;font-weight:700;color:#dce7dc}
 .year-card-count{font:700 20px 'Space Grotesk',sans-serif;color:#baf263}
