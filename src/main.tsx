@@ -1972,6 +1972,7 @@ function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
   const [exporting, setExporting] = useState(false);
   const [mutating, setMutating] = useState<'draft' | 'submitted' | 'delete' | null>(null);
+  const [savingPiApproval, setSavingPiApproval] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
   const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name || '', s.student.enrollment || '', s.student.email || ''].some(v => v.toLowerCase().includes(query.toLowerCase())));
@@ -2041,6 +2042,36 @@ function Admin() {
     finally { setExporting(false); }
   }
 
+  async function setPiApproval(deptId: string, approved: boolean) {
+    if (!selected) return;
+    const currentVal = Boolean(selected.piApproved?.[deptId]);
+    if (currentVal === approved) return;
+    setSavingPiApproval(deptId);
+    try {
+      await api<{ ok: boolean; piApproved: Record<string, boolean> }>(
+        `/admin/submissions/${encodeURIComponent(selected.student.enrollment)}/pi-approval`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ deptId, approved }),
+        }
+      );
+      const updatedSub: Submission = {
+        ...selected,
+        piApproved: { ...(selected.piApproved || {}), [deptId]: approved },
+      };
+      setSelected(updatedSub);
+      setItems(curr =>
+        curr.map(item =>
+          item.student.enrollment === selected.student.enrollment ? updatedSub : item
+        )
+      );
+    } catch (e) {
+      setActionError((e as Error).message || 'Failed to update PI approval.');
+    } finally {
+      setSavingPiApproval(null);
+    }
+  }
+
   function exportSingleJSON() {
     if (!selected) return;
     const jsonStr = JSON.stringify(selected, null, 2);
@@ -2088,8 +2119,34 @@ function Admin() {
     const legacyAns = selected.answers?.[deptId] || {};
     const selectedTasks = (selected.deptSelected || {})[deptId] || [];
     if (config) {
+      const isApproved = Boolean(selected.piApproved?.[config.id]);
       return <div className="detail-track" key={config.id}>
-        <h4>{config.name}</h4>
+        <div className="detail-track-top">
+          <h4>{config.name}</h4>
+          <div className="pi-approval-control">
+            <span className="pi-approval-label">PI Approved:</span>
+            <div className="pi-approval-buttons" role="group" aria-label={`PI approval for ${config.name}`}>
+              <button
+                type="button"
+                className={'pi-btn tick' + (isApproved ? ' active' : '')}
+                onClick={() => setPiApproval(config.id, true)}
+                disabled={savingPiApproval === config.id}
+                title="Mark PI Approved (Tick)"
+              >
+                <Check size={14}/> {isApproved ? 'Approved' : ''}
+              </button>
+              <button
+                type="button"
+                className={'pi-btn cross' + (!isApproved ? ' active' : '')}
+                onClick={() => setPiApproval(config.id, false)}
+                disabled={savingPiApproval === config.id}
+                title="Mark Not Approved (Cross)"
+              >
+                <X size={14}/> {!isApproved ? 'Not Approved' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
         {config.globalFields.map(f => {
           const val = deptAns[f.key] !== undefined ? deptAns[f.key] : legacyAns[f.key];
           if (!val) return null;
@@ -2138,8 +2195,34 @@ function Admin() {
     }
     const track = tracks.find(t => t.id === deptId);
     if (!track) return null;
+    const isTrackApproved = Boolean(selected.piApproved?.[track.id]);
     return <div className="detail-track" key={track.id}>
-      <h4>{track.name}</h4>
+      <div className="detail-track-top">
+        <h4>{track.name}</h4>
+        <div className="pi-approval-control">
+          <span className="pi-approval-label">PI Approved:</span>
+          <div className="pi-approval-buttons" role="group" aria-label={`PI approval for ${track.name}`}>
+            <button
+              type="button"
+              className={'pi-btn tick' + (isTrackApproved ? ' active' : '')}
+              onClick={() => setPiApproval(track.id, true)}
+              disabled={savingPiApproval === track.id}
+              title="Mark PI Approved (Tick)"
+            >
+              <Check size={14}/> {isTrackApproved ? 'Approved' : ''}
+            </button>
+            <button
+              type="button"
+              className={'pi-btn cross' + (!isTrackApproved ? ' active' : '')}
+              onClick={() => setPiApproval(track.id, false)}
+              disabled={savingPiApproval === track.id}
+              title="Mark Not Approved (Cross)"
+            >
+              <X size={14}/> {!isTrackApproved ? 'Not Approved' : ''}
+            </button>
+          </div>
+        </div>
+      </div>
       {track.fields.map(f => <div key={f.key}><small>{f.label}</small><p>{legacyAns[f.key] ? (f.type === 'url' ? <a href={legacyAns[f.key]} target="_blank" rel="noreferrer">{legacyAns[f.key]} <ArrowUpRight size={13}/></a> : legacyAns[f.key]) : '—'}</p></div>)}
       <DeptAdminNotes
         enrollment={selected.student.enrollment}

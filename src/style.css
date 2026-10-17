@@ -129,3 +129,18 @@
 .admin-notes-textarea{width:100%;border:1px solid #2e4a33;border-radius:4px;background:#09170e;color:#e8eee7;padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.5;resize:vertical;min-height:68px;transition:border-color .2s,background .2s;box-sizing:border-box}
 .admin-notes-textarea:focus{outline:0;border-color:#baf263;background:#0e2114}
 .admin-notes-textarea::placeholder{color:#647c6b}
+
+/* ── PI Approval Toggle ────────────────────────────────────────────────── */
+.detail-track-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.detail-track-top h4{margin:0}
+.pi-approval-control{display:flex;align-items:center;gap:8px}
+.pi-approval-label{font-size:11px;font-weight:700;letter-spacing:.5px;color:#9cb29f}
+.pi-approval-buttons{display:inline-flex;gap:3px;background:#09170e;padding:2px;border-radius:4px;border:1px solid #233e29}
+.pi-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:5px 9px;border-radius:3px;border:1px solid transparent;background:transparent;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s}
+.pi-btn.tick{color:#729676}
+.pi-btn.tick:hover{color:#baf263;background:#142a1b}
+.pi-btn.tick.active{background:#1b3d22;border-color:#baf263;color:#baf263}
+.pi-btn.cross{color:#8c7674}
+.pi-btn.cross:hover{color:#ffaaa0;background:#2b1816}
+.pi-btn.cross.active{background:#381a17;border-color:#e06050;color:#ffaaa0}
+.pi-btn:disabled{opacity:.5;cursor:not-allowed}

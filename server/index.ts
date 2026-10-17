@@ -316,7 +316,7 @@ app.put('/api/draft', (req, res) => {
   if (errors.length) { res.status(400).json({ error: errors[0] }); return; }
   const now = new Date().toISOString();
   const existing = JSON.parse(row.payload) as Submission;
-  const toSave = { ...payload, adminNotes: existing.adminNotes, status: 'draft', updatedAt: now };
+  const toSave = { ...payload, adminNotes: existing.adminNotes, piApproved: existing.piApproved, status: 'draft', updatedAt: now };
   db.prepare('UPDATE submissions SET payload=?,updated_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify(toSave), now, s.enrollment);
   res.json({ updatedAt: now });
 });
@@ -401,7 +401,7 @@ app.post('/api/draft/submit', async (req, res) => {
 
   const now = new Date().toISOString();
   const existingSub = JSON.parse(row.payload) as Submission;
-  const toSubmit = { ...payload, adminNotes: existingSub.adminNotes, status: 'submitted', submittedAt: now, updatedAt: now };
+  const toSubmit = { ...payload, adminNotes: existingSub.adminNotes, piApproved: existingSub.piApproved, status: 'submitted', submittedAt: now, updatedAt: now };
   const result = db.prepare('UPDATE submissions SET payload=?,status=\'submitted\',updated_at=?,submitted_at=? WHERE enrollment=? AND status=\'draft\'').run(JSON.stringify(toSubmit), now, now, s.enrollment);
   if (!result.changes) { res.status(409).json({ error: 'Already submitted.' }); return; }
   clear(req, res, 'draft'); res.json({ submittedAt: now, warnings: warnings.length ? warnings : undefined });
@@ -494,6 +494,28 @@ const handleAdminNotes: express.RequestHandler = (req, res) => {
   res.json({ ok: true, adminNotes, updatedAt: now });
 };
 
+const handleAdminPiApproval: express.RequestHandler = (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const enrollment = getAdminTargetEnrollment(req);
+  if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
+  const row = getRow(enrollment);
+  if (!row) { res.status(404).json({ error: 'Submission not found.' }); return; }
+  const { deptId, approved } = req.body || {};
+  if (typeof deptId !== 'string' || !deptId.trim() || typeof approved !== 'boolean') {
+    res.status(400).json({ error: 'deptId must be a string and approved must be a boolean.' });
+    return;
+  }
+  const submission = JSON.parse(row.payload) as Submission;
+  const piApproved = { ...(submission.piApproved || {}), [deptId.trim()]: approved };
+  const now = new Date().toISOString();
+  const updatedSubmission: Submission = { ...submission, piApproved, updatedAt: now };
+  db.prepare('UPDATE submissions SET payload=?, updated_at=? WHERE enrollment=?')
+    .run(JSON.stringify(updatedSubmission), now, enrollment);
+  res.json({ ok: true, piApproved, updatedAt: now });
+};
+
+app.put('/api/admin/submissions/pi-approval', handleAdminPiApproval);
+app.put('/api/admin/submissions/:enrollment/pi-approval', handleAdminPiApproval);
 app.put('/api/admin/submissions/notes', handleAdminNotes);
 app.put('/api/admin/submissions/:enrollment/notes', handleAdminNotes);
 app.patch('/api/admin/submissions', handleAdminStatusChange);
