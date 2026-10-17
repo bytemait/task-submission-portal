@@ -189,6 +189,21 @@ test('API: draft recovery, autosave, submission updates and admin management', {
     assert.equal(singleExport.data.adminNotes['web-dev'], 'Great job on canteen chaos');
     assert.ok(singleExport.response.headers.get('content-disposition')?.includes('submission-12345678901.json'));
 
+    // PI approval endpoint
+    assert.equal((await call(entryPath + '/pi-approval', 'PUT', { deptId: 'web-dev', approved: true })).response.status, 401);
+    assert.equal((await call(entryPath + '/pi-approval', 'PUT', { deptId: '', approved: true }, adminCookie)).response.status, 400);
+    assert.equal((await call(entryPath + '/pi-approval', 'PUT', { deptId: 'web-dev', approved: 'invalid' }, adminCookie)).response.status, 400);
+    const piRes = await call(entryPath + '/pi-approval', 'PUT', { deptId: 'web-dev', approved: true }, adminCookie);
+    assert.equal(piRes.response.status, 200);
+    assert.equal(piRes.data.piApproved['web-dev'], true);
+    // Fetching admin listings includes piApproved
+    const listingWithPi = await call('/admin/submissions', 'GET', undefined, adminCookie);
+    assert.equal(listingWithPi.data[0].piApproved['web-dev'], true);
+    // Toggling back to cross (false)
+    const piFalseRes = await call(entryPath + '/pi-approval', 'PUT', { deptId: 'web-dev', approved: false }, adminCookie);
+    assert.equal(piFalseRes.response.status, 200);
+    assert.equal(piFalseRes.data.piApproved['web-dev'], false);
+
     // Submitted entries can be deleted and disappear from listings/exports.
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 200);
     assert.equal((await call(entryPath, 'DELETE', undefined, adminCookie)).response.status, 404);

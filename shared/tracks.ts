@@ -83,6 +83,8 @@ export type Submission = {
   profileCompletedAt?: string;
   /** Admin reviewer notes keyed by department ID */
   adminNotes?: Record<string, string>;
+  /** PI approval status keyed by department ID (default false) */
+  piApproved?: Record<string, boolean>;
 };
 
 export const emptySubmission = (): Submission => ({
