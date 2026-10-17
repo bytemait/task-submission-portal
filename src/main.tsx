@@ -1887,17 +1887,19 @@ function AdminMetrics({
 function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [mutating, setMutating] = useState<'draft' | 'delete' | null>(null);
+  const [mutating, setMutating] = useState<'draft' | 'submitted' | 'delete' | null>(null);
   const [actionError, setActionError] = useState('');
   useEffect(() => { api<Submission[]>('/admin/submissions').then(setItems).catch(e => { if (e.message.includes('Sign in')) location.assign('/login'); else setError(e.message); }).finally(() => setLoading(false)); }, []);
   const visible = items.filter(s => (status === 'all' || s.status === status) && (track === 'all' || s.selected.includes(track)) && [s.student.name || '', s.student.enrollment || '', s.student.email || ''].some(v => v.toLowerCase().includes(query.toLowerCase())));
 
-  async function changeSubmission(action: 'draft' | 'delete') {
+  async function changeSubmission(action: 'draft' | 'submitted' | 'delete') {
     if (!selected || mutating) return;
     const entry = selected;
     const label = `${entry.student.name} (${entry.student.enrollment})`;
     const message = action === 'delete'
       ? `Permanently delete the entry for ${label}? All saved profile details and answers will be removed. This cannot be undone.`
+      : action === 'submitted'
+      ? `Move the draft for ${label} to submitted? This will mark their application as officially submitted.`
       : `Move the submission for ${label} back to draft? Their answers will be preserved and they can resume editing. Resubmission still requires an open submission window.`;
     if (!window.confirm(message)) return;
     setMutating(action);
@@ -1907,7 +1909,7 @@ function Admin() {
         method: action === 'delete' ? 'DELETE' : 'PATCH',
         body: JSON.stringify({
           enrollment: entry.student.enrollment,
-          ...(action === 'draft' ? { status: 'draft' } : {}),
+          ...(action === 'draft' || action === 'submitted' ? { status: action } : {}),
         }),
       });
       if (action === 'delete') {
@@ -1966,8 +1968,18 @@ function Admin() {
   <div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
   {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span>
   <div className="detail-actions" aria-busy={!!mutating}>
-    {selected.status === 'submitted' && <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}><Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}</button>}
-    <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}><Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}</button>
+    {selected.status === 'submitted' ? (
+      <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}>
+        <Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}
+      </button>
+    ) : (
+      <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('submitted')}>
+        <Check size={16}/> {mutating === 'submitted' ? 'Moving to submission…' : 'Move to submission'}
+      </button>
+    )}
+    <button className="export-btn danger" disabled={!!mutating} onClick={() => changeSubmission('delete')}>
+      <Trash2 size={16}/> {mutating === 'delete' ? 'Deleting…' : 'Delete entry'}
+    </button>
   </div>
   {actionError && <p className="error-banner" role="alert">{actionError}</p>}
   <div className="detail-facts"><p><span>Enrollment</span>{selected.student.enrollment}</p><p><span>Email</span>{selected.student.email || '—'}</p><p><span>Phone</span>{selected.student.phone || '—'}</p><p><span>Branch</span>{selected.student.academicBranch || '—'}</p><p><span>Year / Sem</span>{selected.student.year ? `Year ${selected.student.year}, Sem ${selected.student.semester || '—'}` : '—'}</p><p><span>Societies</span>{selected.student.inOtherSocieties && (selected.student.societies || []).length > 0 ? (selected.student.societies || []).join(', ') : 'None'}</p><p><span>Instagram</span>{selected.student.instagram || '—'}</p><p><span>Twitter/X</span>{selected.student.twitter || '—'}</p><p><span>Discord</span>{selected.student.discord || '—'}</p><p><span>Updated</span>{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}</p></div><h3>Department submissions</h3>{!selected.selected.length && <p className="muted">No departments selected yet.</p>}{selected.selected.map(deptId => {

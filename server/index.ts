@@ -423,20 +423,40 @@ function getAdminTargetEnrollment(req: express.Request): string | null {
   if (typeof raw !== 'string' || !raw.trim()) return null;
   return normalizeEnrollment(raw);
 }
-const handleAdminMoveToDraft: express.RequestHandler = (req, res) => {
+const handleAdminStatusChange: express.RequestHandler = (req, res) => {
   if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
-  if (req.body?.status !== 'draft') { res.status(400).json({ error: 'Only moving a submitted entry to draft is supported.' }); return; }
+  const targetStatus = req.body?.status;
+  if (targetStatus !== 'draft' && targetStatus !== 'submitted') {
+    res.status(400).json({ error: 'Status must be "draft" or "submitted".' });
+    return;
+  }
   const enrollment = getAdminTargetEnrollment(req);
   if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
   const row = getRow(enrollment);
   if (!row) { res.status(404).json({ error: 'Submission not found.' }); return; }
-  if (row.status !== 'submitted') { res.status(409).json({ error: 'This entry is already a draft.' }); return; }
+  if (row.status === targetStatus) {
+    res.status(409).json({ error: `This entry is already ${targetStatus === 'draft' ? 'a draft' : 'submitted'}.` });
+    return;
+  }
   const now = new Date().toISOString();
-  const submission: Submission = { ...JSON.parse(row.payload), status: 'draft', updatedAt: now };
-  delete submission.submittedAt;
-  db.prepare("UPDATE submissions SET payload=?,status='draft',updated_at=?,submitted_at=NULL WHERE enrollment=? AND status='submitted'")
-    .run(JSON.stringify(submission), now, enrollment);
-  res.json(submission);
+  if (targetStatus === 'draft') {
+    const submission: Submission = { ...JSON.parse(row.payload), status: 'draft', updatedAt: now };
+    delete submission.submittedAt;
+    db.prepare("UPDATE submissions SET payload=?,status='draft',updated_at=?,submitted_at=NULL WHERE enrollment=? AND status='submitted'")
+      .run(JSON.stringify(submission), now, enrollment);
+    res.json(submission);
+    return;
+  } else {
+    const existing = JSON.parse(row.payload) as Submission;
+    const submission: Submission = { ...existing, status: 'submitted', submittedAt: now, updatedAt: now };
+    db.prepare("UPDATE submissions SET payload=?,status='submitted',updated_at=?,submitted_at=? WHERE enrollment=? AND status='draft'")
+      .run(JSON.stringify(submission), now, now, enrollment);
+    for (const [id, s] of sessions) {
+      if (s.role === 'draft' && s.enrollment === enrollment) sessions.delete(id);
+    }
+    res.json({ ...submission, submittedAt: now });
+    return;
+  }
 };
 const handleAdminDelete: express.RequestHandler = (req, res) => {
   if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
@@ -450,8 +470,8 @@ const handleAdminDelete: express.RequestHandler = (req, res) => {
   }
   res.json({ ok: true });
 };
-app.patch('/api/admin/submissions', handleAdminMoveToDraft);
-app.patch('/api/admin/submissions/:enrollment', handleAdminMoveToDraft);
+app.patch('/api/admin/submissions', handleAdminStatusChange);
+app.patch('/api/admin/submissions/:enrollment', handleAdminStatusChange);
 app.delete('/api/admin/submissions', handleAdminDelete);
 app.delete('/api/admin/submissions/:enrollment', handleAdminDelete);
 app.get('/api/admin/export.csv', (req, res) => {
