@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowRight, ArrowLeft, ArrowUpRight, Check, CheckCircle2, ChevronDown, CircleHelp, Download, FolderTree as FolderTreeIcon, LockKeyhole, LogOut, Pencil, Plus, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import {
+  ArrowRight, ArrowLeft, ArrowUpRight, BarChart3, Calendar, Check, CheckCircle2,
+  ChevronDown, ChevronUp, CircleHelp, Download, FolderTree as FolderTreeIcon,
+  GraduationCap, Layers, LockKeyhole, LogOut, Pencil, Plus, Search, Sparkles,
+  Trash2, TrendingUp, Upload, Users, X,
+} from 'lucide-react';
 import { tracks, emptySubmission, type Submission, type Student, type Field } from '../shared/tracks.ts';
 import {
   validateName, validateEmail, validatePhone, validateEnrollment,
@@ -1317,6 +1322,567 @@ function Login() {
   return <Shell admin><main className="login-layout"><div className="login-art"><span className="eyebrow">THE OTHER SIDE OF THE TABLE</span><div className="art-orbit"><span>B<span>.</span></span></div><h1>Great work starts<br/>with <em>great people.</em></h1><p>The BYTE recruitment desk. See what this year's builders are bringing to the table.</p></div><div className="login-form-wrap"><div className="login-card"><span className="login-lock"><LockKeyhole size={23}/></span><p className="section-icon">ADMIN / SIGN IN</p><h2>Welcome back.</h2><p className="muted">Enter your admin password to access submissions.</p><form onSubmit={login}><FieldInput id="password" label="Password" type="password" value={password} onChange={setPassword} required/>{error && <p className="error-banner" role="alert">{error}</p>}<button className="button primary wide" disabled={loading || !password}>{loading ? 'Signing in…' : 'Sign in'} <ArrowRight size={17}/></button></form><p className="login-hint">Only authorized BYTE members can access this area.</p></div></div></main></Shell>;
 }
 
+// ── Admin Metrics & Analytics ───────────────────────────────────────────────
+function getISTDateKey(isoDateString?: string | null): string {
+  if (!isoDateString) return '';
+  try {
+    const d = new Date(isoDateString);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return '';
+  }
+}
+
+function formatISTDayLabel(dateKey: string): string {
+  try {
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d, 12));
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+    }).format(date);
+  } catch {
+    return dateKey;
+  }
+}
+
+function AdminMetrics({
+  items,
+  selectedTrack,
+  onSelectTrack,
+  onSearchBranch,
+  onFilterStatus,
+}: {
+  items: Submission[];
+  selectedTrack: string;
+  onSelectTrack: (track: string) => void;
+  onSearchBranch: (branch: string) => void;
+  onFilterStatus: (status: string) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<'all' | 'departments' | 'timeline' | 'demographics'>('all');
+  const [collapsed, setCollapsed] = useState(false);
+  const [hoveredDay, setHoveredDay] = useState<{ dateKey: string; label: string; submitted: number; drafts: number; total: number } | null>(null);
+
+  const total = items.length;
+  const submitted = items.filter(i => i.status === 'submitted').length;
+  const drafts = items.filter(i => i.status === 'draft').length;
+  const conversionRate = total > 0 ? ((submitted / total) * 100).toFixed(1) : '0';
+  const totalTrackPicks = items.reduce((acc, s) => acc + (s.selected ? s.selected.length : 0), 0);
+  const avgTracks = total > 0 ? (totalTrackPicks / total).toFixed(1) : '0';
+
+  // 1. Department Breakdown
+  const deptStats = deptConfigs.map(dept => {
+    const inDept = items.filter(s => s.selected?.includes(dept.id));
+    const deptSubmitted = inDept.filter(s => s.status === 'submitted').length;
+    const deptDraft = inDept.filter(s => s.status === 'draft').length;
+    return {
+      id: dept.id,
+      name: dept.name,
+      category: dept.category,
+      color: dept.color,
+      total: inDept.length,
+      submitted: deptSubmitted,
+      draft: deptDraft,
+      percentage: total > 0 ? Math.round((inDept.length / total) * 100) : 0,
+      convRate: inDept.length > 0 ? Math.round((deptSubmitted / inDept.length) * 100) : 0,
+    };
+  }).sort((a, b) => b.total - a.total);
+
+  const maxDeptTotal = Math.max(...deptStats.map(d => d.total), 1);
+
+  // 2. Day-Wise Timeline
+  const dates = new Set<string>();
+  const dayCounts = new Map<string, { submitted: number; drafts: number }>();
+
+  items.forEach(s => {
+    const k = getISTDateKey(s.submittedAt || s.updatedAt);
+    if (k) {
+      dates.add(k);
+      if (!dayCounts.has(k)) dayCounts.set(k, { submitted: 0, drafts: 0 });
+      const entry = dayCounts.get(k)!;
+      if (s.status === 'submitted') entry.submitted++;
+      else entry.drafts++;
+    }
+  });
+
+  const sortedDates = Array.from(dates).sort();
+  const timeline: { dateKey: string; label: string; submitted: number; drafts: number; total: number }[] = [];
+
+  if (sortedDates.length > 0) {
+    const minD = new Date(sortedDates[0] + 'T00:00:00+05:30');
+    const maxD = new Date(sortedDates[sortedDates.length - 1] + 'T00:00:00+05:30');
+    const dayMs = 24 * 3600 * 1000;
+    const spanDays = Math.round((maxD.getTime() - minD.getTime()) / dayMs);
+
+    if (spanDays >= 0 && spanDays <= 30) {
+      for (let cur = new Date(minD); cur <= maxD; cur = new Date(cur.getTime() + dayMs)) {
+        const k = getISTDateKey(cur.toISOString());
+        const d = dayCounts.get(k) || { submitted: 0, drafts: 0 };
+        timeline.push({
+          dateKey: k,
+          label: formatISTDayLabel(k),
+          submitted: d.submitted,
+          drafts: d.drafts,
+          total: d.submitted + d.drafts,
+        });
+      }
+    } else {
+      sortedDates.forEach(k => {
+        const d = dayCounts.get(k) || { submitted: 0, drafts: 0 };
+        timeline.push({
+          dateKey: k,
+          label: formatISTDayLabel(k),
+          submitted: d.submitted,
+          drafts: d.drafts,
+          total: d.submitted + d.drafts,
+        });
+      });
+    }
+  }
+
+  const maxTimelineTotal = Math.max(...timeline.map(t => t.total), 5);
+  const peakDay = timeline.reduce<{ dateKey: string; label: string; submitted: number; drafts: number; total: number } | null>(
+    (prev, cur) => (cur.total > (prev?.total || 0) ? cur : prev),
+    timeline[0] || null
+  );
+
+  // 3. Academic Year Stats
+  const yearDefs = [
+    { key: '1', label: '1st Year', sub: 'Freshers' },
+    { key: '2', label: '2nd Year', sub: 'Sophomores' },
+    { key: '3', label: '3rd Year', sub: 'Juniors' },
+    { key: '4', label: '4th Year', sub: 'Seniors' },
+  ];
+
+  const yearStats = yearDefs.map(y => {
+    const matches = items.filter(s => {
+      const yearStr = s.student.year || yearForSemester(s.student.semester) || '';
+      return (
+        yearStr.includes(y.key) ||
+        s.student.semester === String(Number(y.key) * 2 - 1) ||
+        s.student.semester === String(Number(y.key) * 2)
+      );
+    });
+    const subCount = matches.filter(s => s.status === 'submitted').length;
+    const drfCount = matches.filter(s => s.status === 'draft').length;
+    return {
+      ...y,
+      total: matches.length,
+      submitted: subCount,
+      drafts: drfCount,
+      percentage: total > 0 ? Math.round((matches.length / total) * 100) : 0,
+      convRate: matches.length > 0 ? Math.round((subCount / matches.length) * 100) : 0,
+    };
+  });
+
+  // 4. College Branch Stats
+  const branchMap = new Map<string, { total: number; submitted: number; drafts: number }>();
+  items.forEach(s => {
+    const b = (s.student.academicBranch || 'Not specified').trim();
+    if (!branchMap.has(b)) branchMap.set(b, { total: 0, submitted: 0, drafts: 0 });
+    const e = branchMap.get(b)!;
+    e.total++;
+    if (s.status === 'submitted') e.submitted++;
+    else e.drafts++;
+  });
+
+  const branchStats = Array.from(branchMap.entries())
+    .map(([branch, d]) => ({
+      branch,
+      ...d,
+      percentage: total > 0 ? ((d.total / total) * 100).toFixed(1) : '0',
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const maxBranchTotal = Math.max(...branchStats.map(b => b.total), 1);
+  const topBranch = branchStats[0] || { branch: '—', total: 0, percentage: '0' };
+
+  // 5. Engagement Insights
+  const singleTrack = items.filter(s => (s.selected?.length || 0) === 1).length;
+  const twoTracks = items.filter(s => (s.selected?.length || 0) === 2).length;
+  const threePlusTracks = items.filter(s => (s.selected?.length || 0) >= 3).length;
+  const otherSocietiesCount = items.filter(s => s.student.inOtherSocieties).length;
+
+  return (
+    <div className="admin-metrics">
+      {/* KPI Cards */}
+      <div className="stats">
+        <div style={{ cursor: 'pointer' }} onClick={() => onFilterStatus('all')} title="Click to view all applicants">
+          <small>TOTAL APPLICANTS</small>
+          <strong>{total}</strong>
+          <span className="stats-subtext">All candidate profiles</span>
+        </div>
+        <div style={{ cursor: 'pointer' }} onClick={() => onFilterStatus('submitted')} title="Click to filter submitted">
+          <small>SUBMITTED</small>
+          <strong style={{ color: '#baf263' }}>{submitted}</strong>
+          <span className="stats-subtext">{conversionRate}% conversion rate</span>
+        </div>
+        <div style={{ cursor: 'pointer' }} onClick={() => onFilterStatus('draft')} title="Click to filter drafts">
+          <small>IN PROGRESS</small>
+          <strong style={{ color: '#d8caa8' }}>{drafts}</strong>
+          <span className="stats-subtext">{total > 0 ? Math.round((drafts / total) * 100) : 0}% active drafts</span>
+        </div>
+        <div>
+          <small>TRACK SELECTIONS</small>
+          <strong>{totalTrackPicks}</strong>
+          <span className="stats-subtext">{avgTracks} tracks / applicant</span>
+        </div>
+        <div style={{ cursor: 'pointer' }} onClick={() => onSearchBranch(topBranch.branch)} title={`Filter search by branch ${topBranch.branch}`}>
+          <small>TOP BRANCH</small>
+          <strong style={{ fontSize: '28px', lineHeight: 1.2 }}>{topBranch.branch}</strong>
+          <span className="stats-subtext">{topBranch.total} applicants ({topBranch.percentage}%)</span>
+        </div>
+      </div>
+
+      {/* View Switcher & Toggle */}
+      <div className="metrics-topbar">
+        <div className="metrics-tabs">
+          <button
+            type="button"
+            className={'metrics-tab' + (activeTab === 'all' ? ' active' : '')}
+            onClick={() => { setActiveTab('all'); setCollapsed(false); }}
+          >
+            <BarChart3 size={15}/> All Analytics
+          </button>
+          <button
+            type="button"
+            className={'metrics-tab' + (activeTab === 'departments' ? ' active' : '')}
+            onClick={() => { setActiveTab('departments'); setCollapsed(false); }}
+          >
+            <Layers size={15}/> Department Breakdown ({deptConfigs.length})
+          </button>
+          <button
+            type="button"
+            className={'metrics-tab' + (activeTab === 'timeline' ? ' active' : '')}
+            onClick={() => { setActiveTab('timeline'); setCollapsed(false); }}
+          >
+            <Calendar size={15}/> Daily Timeline ({timeline.length}d)
+          </button>
+          <button
+            type="button"
+            className={'metrics-tab' + (activeTab === 'demographics' ? ' active' : '')}
+            onClick={() => { setActiveTab('demographics'); setCollapsed(false); }}
+          >
+            <GraduationCap size={15}/> Year & Branch Demographics
+          </button>
+        </div>
+        <button
+          type="button"
+          className="metrics-toggle-btn"
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? <><ChevronDown size={14}/> Show Visual Metrics</> : <><ChevronUp size={14}/> Hide Visual Metrics</>}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div className="metrics-grid">
+          {/* Department Breakdown */}
+          {(activeTab === 'all' || activeTab === 'departments') && (
+            <div className={'metric-card' + (activeTab === 'departments' ? ' full-width' : '')}>
+              <div className="metric-card-head">
+                <div className="metric-card-title">
+                  <Layers size={18}/>
+                  <div>
+                    <h3>Department Breakdown</h3>
+                    <p className="metric-card-sub">Selections per track · click to filter entries</p>
+                  </div>
+                </div>
+                {selectedTrack !== 'all' ? (
+                  <button type="button" className="link-btn" onClick={() => onSelectTrack('all')}>Clear track filter</button>
+                ) : (
+                  <span className="metric-card-badge">{deptStats.filter(d => d.total > 0).length} with selections</span>
+                )}
+              </div>
+
+              <div className="dept-metric-list">
+                {deptStats.map(d => {
+                  const isSelected = selectedTrack === d.id;
+                  return (
+                    <div
+                      key={d.id}
+                      className={'dept-metric-item' + (isSelected ? ' active' : '')}
+                      onClick={() => onSelectTrack(isSelected ? 'all' : d.id)}
+                      title={`Click to filter entries by ${d.name}`}
+                    >
+                      <div className="dept-metric-header">
+                        <div className="dept-metric-title">
+                          <span className="dept-color-pip" style={{ backgroundColor: d.color }}/>
+                          <span className="dept-metric-name">{d.name}</span>
+                          <span className="dept-metric-cat">{d.category}</span>
+                        </div>
+                        <div className="dept-metric-nums">
+                          <span className="dept-metric-total">{d.total}</span>
+                          <span className="dept-metric-split">({d.submitted} submitted · {d.draft} drafts)</span>
+                        </div>
+                      </div>
+                      <div className="metric-progress-track">
+                        <div
+                          className="metric-progress-fill-submitted"
+                          style={{ width: `${(d.submitted / maxDeptTotal) * 100}%` }}
+                          title={`${d.submitted} submitted`}
+                        />
+                        <div
+                          className="metric-progress-fill-draft"
+                          style={{ width: `${(d.draft / maxDeptTotal) * 100}%` }}
+                          title={`${d.draft} in draft`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Timeline Chart */}
+          {(activeTab === 'all' || activeTab === 'timeline') && (
+            <div className={'metric-card' + (activeTab === 'timeline' ? ' full-width' : '')}>
+              <div className="metric-card-head">
+                <div className="metric-card-title">
+                  <TrendingUp size={18}/>
+                  <div>
+                    <h3>Submission Timeline</h3>
+                    <p className="metric-card-sub">Daily count of submissions and registrations (IST)</p>
+                  </div>
+                </div>
+                {peakDay && peakDay.total > 0 && (
+                  <span className="metric-card-badge">Peak: {peakDay.label} ({peakDay.total})</span>
+                )}
+              </div>
+
+              {timeline.length === 0 ? (
+                <p className="empty" style={{ padding: '30px' }}>No dated activity recorded yet.</p>
+              ) : (
+                <>
+                  <div className="timeline-legend">
+                    <div className="timeline-legend-item">
+                      <span className="timeline-legend-color" style={{ background: '#baf263' }}/>
+                      <span>Submitted</span>
+                    </div>
+                    <div className="timeline-legend-item">
+                      <span className="timeline-legend-color" style={{ background: '#39613e' }}/>
+                      <span>Active / Draft</span>
+                    </div>
+                  </div>
+
+                  <div className="timeline-chart-wrap">
+                    <svg viewBox="0 0 540 160" width="100%" height="160" style={{ overflow: 'visible' }}>
+                      {/* Grid lines */}
+                      {[0, 0.33, 0.66, 1].map((pct, idx) => {
+                        const y = 25 + 105 * (1 - pct);
+                        const val = Math.round(maxTimelineTotal * pct);
+                        return (
+                          <g key={idx}>
+                            <line x1="38" y1={y} x2="525" y2={y} stroke="#1f3724" strokeDasharray="3 3"/>
+                            <text x="32" y={y + 4} textAnchor="end" fill="#69826e" fontSize="10" fontFamily="'DM Mono', monospace">{val}</text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Baseline */}
+                      <line x1="38" y1="130" x2="525" y2="130" stroke="#2c4d32"/>
+
+                      {/* Bars */}
+                      {timeline.map((d, i) => {
+                        const plotW = 485;
+                        const stepW = plotW / timeline.length;
+                        const barW = Math.min(32, Math.max(8, stepW * 0.58));
+                        const cx = 40 + (i + 0.5) * stepW;
+                        const totalH = (d.total / maxTimelineTotal) * 105;
+                        const submittedH = (d.submitted / maxTimelineTotal) * 105;
+                        const draftH = (d.drafts / maxTimelineTotal) * 105;
+                        const yBase = 130;
+                        const isHovered = hoveredDay?.dateKey === d.dateKey;
+
+                        return (
+                          <g
+                            key={d.dateKey}
+                            onMouseEnter={() => setHoveredDay(d)}
+                            onMouseLeave={() => setHoveredDay(null)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <rect x={cx - stepW / 2} y="15" width={stepW} height="130" fill="transparent"/>
+
+                            {submittedH > 0 && (
+                              <rect
+                                x={cx - barW / 2}
+                                y={yBase - submittedH}
+                                width={barW}
+                                height={submittedH}
+                                fill={isHovered ? '#d4ffa3' : '#baf263'}
+                                rx={draftH === 0 ? 3 : 0}
+                              />
+                            )}
+
+                            {draftH > 0 && (
+                              <rect
+                                x={cx - barW / 2}
+                                y={yBase - totalH}
+                                width={barW}
+                                height={draftH}
+                                fill={isHovered ? '#4e8255' : '#39613e'}
+                                rx={3}
+                              />
+                            )}
+
+                            {totalH > 0 && (
+                              <text
+                                x={cx}
+                                y={yBase - totalH - 4}
+                                textAnchor="middle"
+                                fill={isHovered ? '#baf263' : '#a8bda9'}
+                                fontSize="10"
+                                fontWeight="700"
+                                fontFamily="'Space Grotesk', sans-serif"
+                              >
+                                {d.total}
+                              </text>
+                            )}
+
+                            <text
+                              x={cx}
+                              y="146"
+                              textAnchor="middle"
+                              fill={isHovered ? '#baf263' : '#7f9883'}
+                              fontSize={timeline.length > 12 ? '9' : '10'}
+                              fontFamily="'DM Sans', sans-serif"
+                            >
+                              {d.label}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+
+                    {hoveredDay && (
+                      <div className="timeline-active-info">
+                        <span><strong>{hoveredDay.label}</strong>: {hoveredDay.total} total activity</span>
+                        <span>{hoveredDay.submitted} submitted · {hoveredDay.drafts} in-progress</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Academic Year Stats */}
+          {(activeTab === 'all' || activeTab === 'demographics') && (
+            <div className={'metric-card' + (activeTab === 'demographics' ? ' full-width' : '')}>
+              <div className="metric-card-head">
+                <div className="metric-card-title">
+                  <GraduationCap size={18}/>
+                  <div>
+                    <h3>Academic Year Statistics</h3>
+                    <p className="metric-card-sub">Distribution across college study years</p>
+                  </div>
+                </div>
+                <span className="metric-card-badge">4 Cohorts</span>
+              </div>
+
+              <div className="year-grid">
+                {yearStats.map(y => (
+                  <div key={y.key} className="year-card">
+                    <div className="year-card-top">
+                      <div>
+                        <div className="year-card-label">{y.label}</div>
+                        <small style={{ color: '#7a947f', fontSize: 10, letterSpacing: 0.5 }}>{y.sub}</small>
+                      </div>
+                      <div className="year-card-count">{y.total}</div>
+                    </div>
+                    <div className="metric-progress-track">
+                      <div
+                        className="metric-progress-fill-submitted"
+                        style={{ width: `${y.total > 0 ? (y.submitted / y.total) * 100 : 0}%` }}
+                        title={`${y.submitted} submitted`}
+                      />
+                      <div
+                        className="metric-progress-fill-draft"
+                        style={{ width: `${y.total > 0 ? (y.drafts / y.total) * 100 : 0}%` }}
+                        title={`${y.drafts} drafts`}
+                      />
+                    </div>
+                    <div className="year-card-details">
+                      <span>{y.percentage}% of pool</span>
+                      <span>{y.submitted} sub · {y.drafts} draft ({y.convRate}% done)</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cross-track insights */}
+              <div className="insights-row">
+                <div className="insight-pill">
+                  <strong>{singleTrack} ({total > 0 ? Math.round((singleTrack / total) * 100) : 0}%)</strong>
+                  <span>Single Track</span>
+                </div>
+                <div className="insight-pill">
+                  <strong>{twoTracks} ({total > 0 ? Math.round((twoTracks / total) * 100) : 0}%)</strong>
+                  <span>2 Tracks Picked</span>
+                </div>
+                <div className="insight-pill">
+                  <strong>{threePlusTracks} ({total > 0 ? Math.round((threePlusTracks / total) * 100) : 0}%)</strong>
+                  <span>3+ Tracks</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* College Branch Stats */}
+          {(activeTab === 'all' || activeTab === 'demographics') && (
+            <div className={'metric-card' + (activeTab === 'demographics' ? ' full-width' : '')}>
+              <div className="metric-card-head">
+                <div className="metric-card-title">
+                  <Users size={18}/>
+                  <div>
+                    <h3>College Branch Statistics</h3>
+                    <p className="metric-card-sub">Applicants by engineering branch · click to filter</p>
+                  </div>
+                </div>
+                <span className="metric-card-badge">{branchStats.length} branches</span>
+              </div>
+
+              <div className="branch-list">
+                {branchStats.slice(0, 8).map(b => (
+                  <div
+                    key={b.branch}
+                    className="branch-row"
+                    onClick={() => onSearchBranch(b.branch)}
+                    title={`Filter search by "${b.branch}"`}
+                  >
+                    <span className="branch-name">{b.branch}</span>
+                    <div className="branch-bar-wrap">
+                      <div
+                        className="branch-bar-fill"
+                        style={{ width: `${(b.total / maxBranchTotal) * 100}%` }}
+                      />
+                    </div>
+                    <span className="branch-count">{b.total} <small style={{ color: '#738d77', fontSize: 10 }}>({b.percentage}%)</small></span>
+                  </div>
+                ))}
+              </div>
+
+              {otherSocietiesCount > 0 && (
+                <p className="hint" style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #1c3522', color: '#91aa95', fontSize: 12 }}>
+                  💡 <strong>{otherSocietiesCount} applicants ({total > 0 ? Math.round((otherSocietiesCount / total) * 100) : 0}%)</strong> report active membership in other college societies.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin ───────────────────────────────────────────────────────────────────
 function Admin() {
   const [items, setItems] = useState<Submission[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all'); const [track, setTrack] = useState('all'); const [selected, setSelected] = useState<Submission | null>(null);
@@ -1389,7 +1955,15 @@ function Admin() {
     finally { setExporting(false); }
   }
 
-  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div><div className="stats"><div><small>TOTAL APPLICATIONS</small><strong>{items.length}</strong></div><div><small>SUBMITTED</small><strong>{items.filter(i => i.status === 'submitted').length}</strong></div><div><small>IN PROGRESS</small><strong>{items.filter(i => i.status === 'draft').length}</strong></div><div><small>DEPARTMENTS</small><strong>{deptConfigs.length}</strong></div></div><div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
+  return <Shell admin><main className="admin-layout"><div className="admin-head"><div><p className="eyebrow">BYTE / RECRUITMENT DESK</p><h1>Submissions<span className="accent-period">.</span></h1><p>All the ideas and effort coming your way, in one place.</p></div><div className="admin-actions"><button className="export-btn" onClick={exportCSV} disabled={exporting}><Download size={16}/> {exporting ? 'Exporting…' : 'Export CSV'}</button><button className="export-btn secondary" onClick={exportJSON} disabled={exporting}><Download size={16}/> Export JSON</button><button className="logout" onClick={async () => { await post('/admin/logout'); location.assign('/login'); }}><LogOut size={16}/> Sign out</button></div></div>
+  <AdminMetrics
+    items={items}
+    selectedTrack={track}
+    onSelectTrack={setTrack}
+    onSearchBranch={setQuery}
+    onFilterStatus={setStatus}
+  />
+  <div className="admin-content"><div className="admin-section-heading"><h2>All entries</h2><span>{visible.length} results</span></div><div className="filters"><label className="search-field"><Search size={18}/><span className="sr-only">Search entries</span><input placeholder="Search name, enrollment, email..." value={query} onChange={e => setQuery(e.target.value)}/></label><label><span className="sr-only">Filter by status</span><select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="draft">Drafts</option></select></label><label><span className="sr-only">Filter by department</span><select value={track} onChange={e => setTrack(e.target.value)}><option value="all">All departments</option>{deptConfigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label></div>{loading ? <p className="empty">Loading entries…</p> : error ? <p className="error-banner" role="alert">{error}</p> : !visible.length ? <p className="empty">No entries match your filters yet.</p> : <div className="entries"><div className="table-head"><span>STUDENT</span><span>TRACKS</span><span>STATUS</span><span>LAST UPDATED</span><span/></div>{visible.map(s => <button className="entry" key={s.student.enrollment} onClick={() => { setSelected(s); setActionError(''); }}><span className="entry-person"><strong>{s.student.name}</strong><small>{s.student.enrollment}{s.student.academicBranch ? ` · ${s.student.academicBranch}` : ''}</small></span><span className="entry-tracks">{s.selected.length ? s.selected.map(id => deptConfigs.find(d => d.id === id)?.name || tracks.find(t => t.id === id)?.name || id).join(', ') : 'Not selected yet'}</span><span><span className={'badge ' + s.status}>{s.status}</span></span><span className="date">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><ArrowUpRight size={17}/></button>)}</div>}</div></main>
   {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !mutating) setSelected(null); }}><section className="detail" role="dialog" aria-modal="true" aria-label="Submission details"><div className="detail-top"><span className="eyebrow">SUBMISSION DETAILS</span><button onClick={() => setSelected(null)} disabled={!!mutating} aria-label="Close details">✕</button></div><h2>{selected.student.name}</h2><span className={'badge ' + selected.status}>{selected.status}</span>
   <div className="detail-actions" aria-busy={!!mutating}>
     {selected.status === 'submitted' && <button className="export-btn" disabled={!!mutating} onClick={() => changeSubmission('draft')}><Pencil size={16}/> {mutating === 'draft' ? 'Moving to draft…' : 'Move to draft'}</button>}
