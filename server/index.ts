@@ -500,6 +500,17 @@ app.patch('/api/admin/submissions', handleAdminStatusChange);
 app.patch('/api/admin/submissions/:enrollment', handleAdminStatusChange);
 app.delete('/api/admin/submissions', handleAdminDelete);
 app.delete('/api/admin/submissions/:enrollment', handleAdminDelete);
+app.get('/api/admin/submissions/:enrollment/export.json', (req, res) => {
+  if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
+  const enrollment = getAdminTargetEnrollment(req);
+  if (!enrollment) { res.status(400).json({ error: 'Enrollment number is required.' }); return; }
+  const row = getRow(enrollment);
+  if (!row) { res.status(404).json({ error: 'Submission not found.' }); return; }
+  const submission: Submission = { ...JSON.parse(row.payload), updatedAt: row.updated_at, submittedAt: row.submitted_at };
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="submission-${enrollment}.json"`);
+  res.send(JSON.stringify(submission, null, 2));
+});
 app.get('/api/admin/export.csv', (req, res) => {
   if (!session(req, 'admin')) { res.status(401).json({ error: 'Sign in to continue.' }); return; }
   const rows = db.prepare('SELECT * FROM submissions ORDER BY status DESC, updated_at DESC').all() as Row[];
